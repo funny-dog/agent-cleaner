@@ -4,6 +4,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+![Agent Cleaner 面板预览](plugins/dsh/assets/preview-dark.png)
+
 ## 简介
 
 日常使用多个 AI 编程助手时，本地往往会堆积数 GB 的 Shadow Git 快照、孤儿会话记录、安装中断残留的 `node_modules`、长期未访问的 `npx`/`uv` 缓存，以及父进程退出后残留的 `PPID=1` 僵尸 MCP 进程。

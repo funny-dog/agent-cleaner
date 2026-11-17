@@ -4,6 +4,8 @@ Disk cleanup, orphan MCP process audit, and comment-preserving config repair for
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+![Agent Cleaner DSH Panel](plugins/dsh/assets/preview-dark.png)
+
 ## Overview
 
 AI coding agents leave behind gigabytes of shadow Git snapshots, orphaned session logs, undeclared `node_modules`, cold `npx`/`uv` caches, and zombie `PPID=1` stdio MCP processes. `agent-cleaner` provides a shared Rust engine (`cleaner-core`) with three interfaces:

@@ -6,6 +6,10 @@ A DeepSeek Harness (DSH) plugin for auditing and cleaning stale AI coding agent 
 
 Supports **Claude Code**, **OpenCode**, **Codex CLI**, **DSH**, **Gemini / Antigravity**, **Cursor**, **Aider**, and **Ollama**.
 
+![Agent Cleaner DSH Panel (Dark)](https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/plugins/dsh/assets/preview-dark.png)
+
+![Agent Cleaner DSH Panel (Light)](https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/plugins/dsh/assets/preview-light.png)
+
 ## What You Get
 
 - **Visual Cleanup Panel in DSH**: Open **Agent Cleaner** from the left sidebar to inspect disk usage by tool, filter by `Recommended` / `Optional` / `Active Guard (24h)`, preview with Dry-Run, and clean selected items.

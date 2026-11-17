@@ -6,6 +6,10 @@ DeepSeek Harness (DSH) 磁盘清理与配置自愈插件。无需离开 DSH，�
 
 支持 **Claude Code**、**OpenCode**、**Codex CLI**、**DSH**、**Gemini / Antigravity**、**Cursor**、**Aider**、**Ollama**。
 
+![Agent Cleaner DSH 面板（暗色主题）](https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/plugins/dsh/assets/preview-dark.png)
+
+![Agent Cleaner DSH 面板（亮色主题）](https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/plugins/dsh/assets/preview-light.png)
+
 ## 功能特性
 
 - **DSH 侧边栏可视化面板**：从左侧栏打开 **Agent Cleaner**，直观查看各工具磁盘占用分布，按「推荐清理 / 建议复核 / 活跃豁免（24h）」筛选，支持 Dry-Run 预演与按项勾选清理。
