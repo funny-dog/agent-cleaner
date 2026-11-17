@@ -1,9 +1,37 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { apply } from './index.js';
+import { gzipSync } from 'node:zlib';
+import { apply, ensureBinaryPath } from './index.js';
+
+function createTarGz(fileName: string, content: Buffer): Buffer {
+  const BLOCK = 512;
+  const header = Buffer.alloc(BLOCK, 0);
+  header.write(fileName, 0, 100, 'utf8');
+  header.write('0000755\0', 100, 8, 'ascii');
+  header.write('0000000\0', 108, 8, 'ascii');
+  header.write('0000000\0', 116, 8, 'ascii');
+  header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'ascii');
+  header.write('00000000000\0', 136, 12, 'ascii');
+  header.fill(0x20, 148, 156);
+  header.write('0', 156, 1, 'ascii');
+  header.write('ustar\0', 257, 6, 'ascii');
+  header.write('00', 263, 2, 'ascii');
+
+  let checksum = 0;
+  for (let i = 0; i < BLOCK; i += 1) checksum += header[i]!;
+  header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'ascii');
+
+  const paddedLen = Math.ceil(content.length / BLOCK) * BLOCK;
+  const body = Buffer.alloc(paddedLen, 0);
+  content.copy(body, 0);
+
+  const trailer = Buffer.alloc(BLOCK * 2, 0);
+  return gzipSync(Buffer.concat([header, body, trailer]));
+}
 
 test('DSH plugin registers all 4 headless tools and invokes binary with --json', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-plugin-test-'));
@@ -68,6 +96,59 @@ test('DSH plugin registers all 4 headless tools and invokes binary with --json',
   assert.deepEqual(mcpRes.argv, ['mcp', '--kill', '--json']);
 
   await fs.rm(tmpDir, { recursive: true, force: true });
+});
+
+test('DSH plugin auto-downloads binary once on concurrent calls when missing locally', async () => {
+  if (process.platform === 'win32') return;
+
+  const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-plugin-dl-'));
+  const prevHome = process.env.HOME;
+  const prevPath = process.env.PATH;
+
+  const stubScript = Buffer.from(
+    '#!/usr/bin/env node\nconsole.log(JSON.stringify({ ok: true, argv: process.argv.slice(2) }));\n',
+    'utf8',
+  );
+  const archive = createTarGz('agent-cleaner', stubScript);
+
+  let downloadCount = 0;
+  const server = http.createServer((_req, res) => {
+    downloadCount += 1;
+    res.writeHead(200, { 'content-type': 'application/gzip' });
+    res.end(archive);
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const addr = server.address();
+  assert.ok(addr && typeof addr !== 'string');
+  const downloadUrl = `http://127.0.0.1:${addr.port}/agent-cleaner.tar.gz`;
+
+  try {
+    process.env.HOME = tmpHome;
+    process.env.PATH = '';
+
+    const [p1, p2] = await Promise.all([
+      ensureBinaryPath({ downloadUrl }),
+      ensureBinaryPath({ downloadUrl }),
+    ]);
+
+    const expected = path.join(tmpHome, '.agent-cleaner', 'bin', 'agent-cleaner');
+    assert.equal(p1, expected);
+    assert.equal(p2, expected);
+    assert.equal(downloadCount, 1);
+
+    const p3 = await ensureBinaryPath({ downloadUrl });
+    assert.equal(p3, expected);
+    assert.equal(downloadCount, 1);
+
+    const stat = await fs.stat(expected);
+    assert.ok((stat.mode & 0o111) !== 0);
+  } finally {
+    process.env.HOME = prevHome;
+    process.env.PATH = prevPath;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  }
 });
 
 test('DSH client bundle registers sidebar.panellist and main slots via __ModuleLoader__', async () => {

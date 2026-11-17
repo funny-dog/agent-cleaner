@@ -1,28 +1,192 @@
 /**
  * DeepSeek Harness (DSH) Cordis plugin for agent-cleaner.
- * Exposes headless Cordis Tools and HTTP bridge routes backed by the `agent-cleaner` Rust CLI.
+ * Exposes headless Cordis Tools and HTTP bridge routes backed by the `agent-cleaner` binary.
  */
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 const execFileAsync = promisify(execFile);
+const REPO_RELEASE_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/latest/download';
+const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const name = 'agent-cleaner';
 export const inject = ['tools'];
-function resolveBinaryPath(configured) {
-    if (configured)
-        return configured;
-    const home = os.homedir();
-    const candidates = [
-        path.join(home, '.local', 'bin', 'agent-cleaner'),
-        path.join(home, '.cargo', 'bin', 'agent-cleaner'),
-    ];
-    for (const candidate of candidates) {
-        if (existsSync(candidate))
+const inFlightDownloads = new Map();
+function binaryFilename(platform = process.platform) {
+    return platform === 'win32' ? 'agent-cleaner.exe' : 'agent-cleaner';
+}
+export function resolveReleaseAssetName(platform = process.platform, arch = process.arch) {
+    if (platform === 'darwin' && arch === 'arm64')
+        return 'agent-cleaner-darwin-arm64.tar.gz';
+    if (platform === 'darwin' && arch === 'x64')
+        return 'agent-cleaner-darwin-x64.tar.gz';
+    if (platform === 'linux' && arch === 'x64')
+        return 'agent-cleaner-linux-x64.tar.gz';
+    if (platform === 'linux' && arch === 'arm64')
+        return 'agent-cleaner-linux-arm64.tar.gz';
+    if (platform === 'win32' && arch === 'x64')
+        return 'agent-cleaner-win32-x64.zip';
+    throw new Error(`Unsupported platform for auto-downloading agent-cleaner: ${platform}/${arch}. Install manually or configure binaryPath.`);
+}
+function isExistingFile(filePath) {
+    try {
+        return existsSync(filePath) && statSync(filePath).isFile();
+    }
+    catch {
+        return false;
+    }
+}
+function findInPath(binName) {
+    const pathEnv = process.env.PATH ?? '';
+    for (const dir of pathEnv.split(path.delimiter)) {
+        if (!dir)
+            continue;
+        const candidate = path.join(dir, binName);
+        if (isExistingFile(candidate))
             return candidate;
     }
-    return 'agent-cleaner';
+    return null;
+}
+function managedBinaryPath(platform = process.platform) {
+    return path.join(os.homedir(), '.agent-cleaner', 'bin', binaryFilename(platform));
+}
+export function findExistingBinaryPath(configured) {
+    if (configured)
+        return configured;
+    const binName = binaryFilename();
+    const home = os.homedir();
+    const candidates = [
+        managedBinaryPath(),
+        path.join(home, '.local', 'bin', binName),
+        path.join(home, '.cargo', 'bin', binName),
+    ];
+    for (const candidate of candidates) {
+        if (isExistingFile(candidate))
+            return candidate;
+    }
+    return findInPath(binName);
+}
+export function extractBinaryFromTarGz(gzBuffer, targetFileName) {
+    const tar = gunzipSync(gzBuffer);
+    const BLOCK = 512;
+    let offset = 0;
+    while (offset + BLOCK <= tar.length) {
+        const header = tar.subarray(offset, offset + BLOCK);
+        const entryName = header.toString('utf8', 0, 100).replace(/\0.*$/s, '');
+        if (!entryName)
+            break;
+        const rawSize = header.toString('ascii', 124, 136).replace(/\0.*$/s, '').trim();
+        const size = rawSize ? Number.parseInt(rawSize, 8) : 0;
+        if (!Number.isFinite(size) || size < 0) {
+            throw new Error(`Invalid tar entry size for ${entryName}`);
+        }
+        const typeFlag = String.fromCharCode(header[156] ?? 0);
+        const prefix = header.toString('utf8', 345, 500).replace(/\0.*$/s, '');
+        const fullPath = prefix ? `${prefix}/${entryName}` : entryName;
+        offset += BLOCK;
+        if ((typeFlag === '0' || typeFlag === '\0') && path.posix.basename(fullPath) === targetFileName) {
+            if (offset + size > tar.length) {
+                throw new Error(`Truncated tar entry for ${fullPath}`);
+            }
+            return tar.subarray(offset, offset + size);
+        }
+        offset += Math.ceil(size / BLOCK) * BLOCK;
+    }
+    throw new Error(`Archive does not contain ${targetFileName}`);
+}
+function buildDownloadCandidates(config) {
+    const explicitUrl = config?.downloadUrl ?? process.env.AGENT_CLEANER_BINARY_URL;
+    if (explicitUrl) {
+        const inferredAsset = explicitUrl.endsWith('.zip') ? 'agent-cleaner.zip' : 'agent-cleaner.tar.gz';
+        return { assetName: inferredAsset, urls: [explicitUrl] };
+    }
+    const assetName = resolveReleaseAssetName();
+    const canonicalUrl = `${REPO_RELEASE_BASE}/${assetName}`;
+    const proxy = process.env.DSHM_GITHUB_PROXY?.trim().replace(/\/+$/, '');
+    const urls = proxy ? [`${proxy}/${canonicalUrl}`, canonicalUrl] : [canonicalUrl];
+    return { assetName, urls };
+}
+async function downloadAndInstallBinary(destPath, config) {
+    const { assetName, urls } = buildDownloadCandidates(config);
+    const destDir = path.dirname(destPath);
+    mkdirSync(destDir, { recursive: true });
+    const errors = [];
+    let archiveBuffer = null;
+    for (const url of urls) {
+        try {
+            const res = await fetch(url, {
+                redirect: 'follow',
+                signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+            });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status} ${res.statusText}`.trim());
+            }
+            archiveBuffer = Buffer.from(await res.arrayBuffer());
+            break;
+        }
+        catch (err) {
+            errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    if (!archiveBuffer) {
+        throw new Error(`Failed to download agent-cleaner binary automatically (${errors.join('; ')}). ` +
+            `Set plugin config "binaryPath" or install agent-cleaner into PATH.`);
+    }
+    const tmpPath = `${destPath}.tmp-${process.pid}-${Date.now()}`;
+    try {
+        if (assetName.endsWith('.zip')) {
+            const tmpZip = `${destPath}.download-${process.pid}-${Date.now()}.zip`;
+            const extractDir = `${destPath}.extract-${process.pid}-${Date.now()}`;
+            writeFileSync(tmpZip, archiveBuffer);
+            try {
+                mkdirSync(extractDir, { recursive: true });
+                await execFileAsync('powershell.exe', [
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-Command',
+                    `Expand-Archive -Path '${tmpZip.replaceAll("'", "''")}' -DestinationPath '${extractDir.replaceAll("'", "''")}' -Force`,
+                ]);
+                const extractedExe = path.join(extractDir, binaryFilename('win32'));
+                if (!isExistingFile(extractedExe)) {
+                    throw new Error(`Archive does not contain ${binaryFilename('win32')}`);
+                }
+                renameSync(extractedExe, tmpPath);
+            }
+            finally {
+                rmSync(tmpZip, { force: true });
+                rmSync(extractDir, { recursive: true, force: true });
+            }
+        }
+        else {
+            const binaryBuf = extractBinaryFromTarGz(archiveBuffer, binaryFilename());
+            writeFileSync(tmpPath, binaryBuf);
+            if (process.platform !== 'win32') {
+                chmodSync(tmpPath, 0o755);
+            }
+        }
+        renameSync(tmpPath, destPath);
+        return destPath;
+    }
+    catch (err) {
+        rmSync(tmpPath, { force: true });
+        throw err;
+    }
+}
+export async function ensureBinaryPath(config) {
+    const existing = findExistingBinaryPath(config?.binaryPath);
+    if (existing)
+        return existing;
+    const destPath = managedBinaryPath();
+    const pending = inFlightDownloads.get(destPath);
+    if (pending)
+        return pending;
+    const job = downloadAndInstallBinary(destPath, config).finally(() => {
+        inFlightDownloads.delete(destPath);
+    });
+    inFlightDownloads.set(destPath, job);
+    return job;
 }
 function resolveService(ctx, serviceName) {
     try {
@@ -32,7 +196,8 @@ function resolveService(ctx, serviceName) {
         return undefined;
     }
 }
-async function runCliJson(binaryPath, args) {
+async function runCliJson(config, args) {
+    const binaryPath = await ensureBinaryPath(config);
     const { stdout } = await execFileAsync(binaryPath, [...args, '--json'], {
         maxBuffer: 16 * 1024 * 1024,
     });
@@ -71,7 +236,7 @@ function buildTextOutputSpec() {
         ],
     };
 }
-function registerHttpRoutes(ctx, bin, defaultHours) {
+function registerHttpRoutes(ctx, config, defaultHours) {
     if (typeof ctx?.inject !== 'function')
         return;
     ctx.inject(['webServer'], (sctx) => {
@@ -107,11 +272,12 @@ function registerHttpRoutes(ctx, bin, defaultHours) {
                     const hours = Number(url.searchParams.get('hours') ?? defaultHours);
                     const safeHours = Number.isFinite(hours) && hours >= 0 ? Math.floor(hours) : defaultHours;
                     const lang = url.searchParams.get('lang') === 'en' ? 'en' : 'zh';
+                    await ensureBinaryPath(config);
                     const [agents, doctors, mcpAudit, trash] = await Promise.all([
-                        runCliJson(bin, ['scan', '--older-than', `${safeHours}h`, '--lang', lang]),
-                        runCliJson(bin, ['doctor']),
-                        runCliJson(bin, ['mcp']),
-                        runCliJson(bin, ['restore']),
+                        runCliJson(config, ['scan', '--older-than', `${safeHours}h`, '--lang', lang]),
+                        runCliJson(config, ['doctor']),
+                        runCliJson(config, ['mcp']),
+                        runCliJson(config, ['restore']),
                     ]);
                     return { agents, doctors, mcpAudit, trash, exemptHours: safeHours, lang };
                 }),
@@ -128,21 +294,21 @@ function registerHttpRoutes(ctx, bin, defaultHours) {
                     if (Array.isArray(body.selectedIds) && body.selectedIds.length > 0) {
                         args.push('--ids', body.selectedIds.map(String).join(','));
                     }
-                    return runCliJson(bin, args);
+                    return runCliJson(config, args);
                 }),
-                route('/agent-cleaner/api/doctor-fix', 'POST', () => runCliJson(bin, ['doctor', '--fix'])),
-                route('/agent-cleaner/api/mcp-kill', 'POST', () => runCliJson(bin, ['mcp', '--kill'])),
+                route('/agent-cleaner/api/doctor-fix', 'POST', () => runCliJson(config, ['doctor', '--fix'])),
+                route('/agent-cleaner/api/mcp-kill', 'POST', () => runCliJson(config, ['mcp', '--kill'])),
                 route('/agent-cleaner/api/restore', 'POST', (body) => {
                     if (typeof body.batchId !== 'string' || !body.batchId) {
                         throw new Error('batchId is required');
                     }
-                    return runCliJson(bin, ['restore', body.batchId]);
+                    return runCliJson(config, ['restore', body.batchId]);
                 }),
                 route('/agent-cleaner/api/purge', 'POST', (body) => {
                     if (body.all)
-                        return runCliJson(bin, ['restore', '--purge-all']);
+                        return runCliJson(config, ['restore', '--purge-all']);
                     if (typeof body.batchId === 'string' && body.batchId) {
-                        return runCliJson(bin, ['restore', '--purge', body.batchId]);
+                        return runCliJson(config, ['restore', '--purge', body.batchId]);
                     }
                     throw new Error('batchId or all=true is required');
                 }),
@@ -164,9 +330,8 @@ function registerHttpRoutes(ctx, bin, defaultHours) {
     });
 }
 export function apply(ctx, config) {
-    const bin = resolveBinaryPath(config?.binaryPath);
     const defaultHours = config?.exemptRecentHours ?? 24;
-    registerHttpRoutes(ctx, bin, defaultHours);
+    registerHttpRoutes(ctx, config, defaultHours);
     const tools = resolveService(ctx, 'tools');
     if (!tools || typeof tools.register !== 'function')
         return;
@@ -191,7 +356,7 @@ export function apply(ctx, config) {
             const cliArgs = ['scan', '--older-than', `${args.olderThanHours ?? defaultHours}h`];
             if (args.agent)
                 cliArgs.push('--agent', args.agent);
-            return runCliJson(bin, cliArgs);
+            return runCliJson(config, cliArgs);
         },
     });
     tools.register({
@@ -228,7 +393,7 @@ export function apply(ctx, config) {
                 cliArgs.push('--dry-run');
             if (args.selectedIds?.length)
                 cliArgs.push('--ids', args.selectedIds.join(','));
-            return runCliJson(bin, cliArgs);
+            return runCliJson(config, cliArgs);
         },
     });
     tools.register({
@@ -248,7 +413,7 @@ export function apply(ctx, config) {
             const cliArgs = ['doctor'];
             if (args.fix)
                 cliArgs.push('--fix');
-            return runCliJson(bin, cliArgs);
+            return runCliJson(config, cliArgs);
         },
     });
     tools.register({
@@ -268,7 +433,7 @@ export function apply(ctx, config) {
             const cliArgs = ['mcp'];
             if (args.kill)
                 cliArgs.push('--kill');
-            return runCliJson(bin, cliArgs);
+            return runCliJson(config, cliArgs);
         },
     });
 }

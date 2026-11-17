@@ -1,7 +1,8 @@
 {
   "name": "dsh-agent-cleaner",
   "version": "0.2.0",
-  "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding agents inside DeepSeek Harness (DSH).",
+  "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding tools inside DeepSeek Harness (DSH).",
+  "icon": "icon.svg",
   "author": "funny-dog",
   "license": "MIT",
   "repository": {
@@ -49,6 +50,7 @@
     }
   },
   "files": [
+    "icon.svg",
     "dist/index.js",
     "dist/index.d.ts",
     "dist/client.js",
@@ -62,6 +64,9 @@
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test dist/index.test.js"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0 || >=4.0.0-alpha.0 <5.0.0"

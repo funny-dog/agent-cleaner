@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: agent-cleaner-darwin-arm64.tar.gz
+            bin: agent-cleaner
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: agent-cleaner-darwin-x64.tar.gz
+            bin: agent-cleaner
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            asset: agent-cleaner-linux-x64.tar.gz
+            bin: agent-cleaner
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: agent-cleaner-linux-arm64.tar.gz
+            bin: agent-cleaner
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: agent-cleaner-win32-x64.zip
+            bin: agent-cleaner.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build cleaner-cli
+        run: cargo build --release -p cleaner-cli --target ${{ matrix.target }} --bin agent-cleaner
+      - name: Package archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist-artifacts
+          tar -C "target/${{ matrix.target }}/release" -czf "dist-artifacts/${{ matrix.asset }}" "${{ matrix.bin }}"
+      - name: Package archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts | Out-Null
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.bin }}" -DestinationPath "dist-artifacts/${{ matrix.asset }}" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist-artifacts/${{ matrix.asset }}
+
+  publish-release:
+    needs: build-cli
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate SHA256SUMS
+        run: |
+          cd release-assets
+          sha256sum agent-cleaner-* > SHA256SUMS.txt
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --title "$TAG" --generate-notes
+          fi
+
+  publish-npm:
+    needs: publish-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build:plugins
+      - run: npm --workspace=dsh-agent-cleaner test
+      - name: Publish dsh-agent-cleaner to npm (if NPM_TOKEN is configured)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not set; skipping npm publish."
+            exit 0
+          fi
+          npm publish --workspace=dsh-agent-cleaner --access public
