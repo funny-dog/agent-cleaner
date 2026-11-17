@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cleaner-core",
+    "crates/cleaner-cli",
+    "apps/desktop/src-tauri",
+]

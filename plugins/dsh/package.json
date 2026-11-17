@@ -1,0 +1,84 @@
+{
+  "name": "dsh-agent-cleaner",
+  "version": "0.2.0",
+  "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding agents inside DeepSeek Harness (DSH).",
+  "author": "funny-dog",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/funny-dog/agent-cleaner.git",
+    "directory": "plugins/dsh"
+  },
+  "homepage": "https://github.com/funny-dog/agent-cleaner/tree/main/plugins/dsh",
+  "bugs": {
+    "url": "https://github.com/funny-dog/agent-cleaner/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "agent-cleaner",
+    "mcp",
+    "cleanup",
+    "claude-code",
+    "opencode",
+    "codex"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./client": "./dist/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "external": [],
+      "immediately": false
+    }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/client.js",
+    "dist/client.d.ts",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/index.test.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.0 || >=4.0.0-alpha.0 <5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "esbuild": "^0.25.0",
+    "react": "^19.1.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

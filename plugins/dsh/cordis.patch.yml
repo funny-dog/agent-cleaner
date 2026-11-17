@@ -1,0 +1,3 @@
+- insert:
+    - id: agent-cleaner
+      name: "dsh-agent-cleaner"

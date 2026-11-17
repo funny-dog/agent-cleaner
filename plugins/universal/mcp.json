@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agent-cleaner": {
+      "command": "agent-cleaner",
+      "args": [
+        "mcp-server"
+      ]
+    }
+  }
+}

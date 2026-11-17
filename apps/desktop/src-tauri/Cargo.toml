@@ -1,0 +1,22 @@
+[package]
+name = "agent-cleaner-desktop"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "agent_cleaner_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+cleaner-core = { path = "../../../crates/cleaner-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+specta = { version = "2.0.0-rc.28", features = ["derive"] }
+specta-typescript = "0.0.15"
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-specta = { version = "2.0.0-rc.29", features = ["derive", "typescript"] }
+tokio = { version = "1", features = ["time"] }

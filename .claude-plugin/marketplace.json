@@ -1,0 +1,13 @@
+{
+  "name": "agent-cleaner-marketplace",
+  "owner": {
+    "name": "funny-dog"
+  },
+  "plugins": [
+    {
+      "name": "agent-cleaner",
+      "source": "./plugins/universal",
+      "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding agents."
+    }
+  ]
+}
