@@ -253,6 +253,12 @@ const NON_AGENT_XDG_DIRS: &[&str] = &[
     "wezterm",
     "tmux",
     "1password",
+    "puppeteer",
+    "ms-playwright",
+    "zig",
+    "pkg",
+    "node",
+    "tree-sitter",
 ];
 
 const AGENT_MARKER_FILES: &[&str] = &[
@@ -433,6 +439,14 @@ fn classify_cleanable_subdir(name: &str) -> Option<(ScanCategory, &'static str, 
         | "dawngraphitecache" | "dawnwebgpucache" => {
             Some((ScanCategory::Cache, "自动发现缓存目录", "auto-discovered cache directory"))
         }
+        "backup" | "backups" | "config-backups" => {
+            Some((ScanCategory::Backup, "自动发现历史备份", "auto-discovered historical backups"))
+        }
+        "updates" => Some((
+            ScanCategory::Updater,
+            "自动发现更新器缓存",
+            "auto-discovered updater cache",
+        )),
         _ if lower.contains("updater") || lower == "shipit" => Some((
             ScanCategory::Updater,
             "自动发现更新器缓存",
@@ -442,7 +456,11 @@ fn classify_cleanable_subdir(name: &str) -> Option<(ScanCategory, &'static str, 
     }
 }
 
-fn collect_safe_cleanable_subdirs(root: &Path, depth: u8, out: &mut Vec<(PathBuf, ScanCategory, &'static str, &'static str)>) {
+fn collect_safe_cleanable_subdirs(
+    root: &Path,
+    depth: u8,
+    out: &mut Vec<(PathBuf, ScanCategory, &'static str, &'static str)>,
+) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -451,10 +469,24 @@ fn collect_safe_cleanable_subdirs(root: &Path, depth: u8, out: &mut Vec<(PathBuf
         let Ok(ft) = entry.file_type() else {
             continue;
         };
-        if !ft.is_dir() || ft.is_symlink() {
+        if ft.is_symlink() {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
+        if ft.is_file() {
+            if depth == 0 && name.to_ascii_lowercase().ends_with(".log") {
+                out.push((
+                    path,
+                    ScanCategory::Log,
+                    "自动发现运行日志文件",
+                    "auto-discovered runtime log file",
+                ));
+            }
+            continue;
+        }
+        if !ft.is_dir() {
+            continue;
+        }
         if let Some((cat, zh, en)) = classify_cleanable_subdir(&name) {
             out.push((path, cat, zh, en));
         } else if depth == 0
@@ -512,6 +544,13 @@ fn make_heuristic_item(
     Some(item)
 }
 
+#[derive(Clone, Copy)]
+enum DiscoveryRootKind {
+    Standard,
+    CacheRoot,
+    LogRoot,
+}
+
 /// Safely discover AI agent directories not covered by built-in or custom targets.
 pub fn discover_unknown_agent_results(
     ctx: &CleanerContext,
@@ -529,8 +568,8 @@ pub fn discover_unknown_agent_results(
         }
     }
 
-    // Gather candidate (agent_id, dir, is_library_cache_root)
-    let mut candidates: Vec<(String, PathBuf, bool)> = Vec::new();
+    // Gather candidate (agent_id, dir, root_kind)
+    let mut candidates: Vec<(String, PathBuf, DiscoveryRootKind)> = Vec::new();
 
     if let Ok(entries) = fs::read_dir(&ctx.home_dir) {
         for entry in entries.flatten() {
@@ -552,20 +591,24 @@ pub fn discover_unknown_agent_results(
             if has_agent_markers(&path) || name_matches_agent_keyword(&name) {
                 let id = normalize_agent_id(&name);
                 if !id.is_empty() {
-                    candidates.push((id, path, false));
+                    candidates.push((id, path, DiscoveryRootKind::Standard));
                 }
             }
         }
     }
 
-    for parent in [
-        ctx.home_dir.join(".config"),
-        ctx.home_dir.join(".local/share"),
+    for (parent, kind) in [
+        (ctx.home_dir.join(".config"), DiscoveryRootKind::Standard),
+        (ctx.home_dir.join(".local/share"), DiscoveryRootKind::Standard),
+        (ctx.home_dir.join(".cache"), DiscoveryRootKind::CacheRoot),
     ] {
         if let Ok(entries) = fs::read_dir(&parent) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_dir() || is_path_claimed(&path, &claimed) {
+                let Ok(ft) = entry.file_type() else {
+                    continue;
+                };
+                if !ft.is_dir() || ft.is_symlink() || is_path_claimed(&path, &claimed) {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().to_string();
@@ -576,28 +619,32 @@ pub fn discover_unknown_agent_results(
                 if has_agent_markers(&path) || name_matches_agent_keyword(&name) {
                     let id = normalize_agent_id(&name);
                     if !id.is_empty() {
-                        candidates.push((id, path, false));
+                        candidates.push((id, path, kind));
                     }
                 }
             }
         }
     }
 
-    for (parent, is_cache_root) in [
-        (ctx.home_dir.join("Library/Application Support"), false),
-        (ctx.home_dir.join("Library/Caches"), true),
+    for (parent, kind) in [
+        (ctx.home_dir.join("Library/Application Support"), DiscoveryRootKind::Standard),
+        (ctx.home_dir.join("Library/Caches"), DiscoveryRootKind::CacheRoot),
+        (ctx.home_dir.join("Library/Logs"), DiscoveryRootKind::LogRoot),
     ] {
         if let Ok(entries) = fs::read_dir(&parent) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_dir() || is_path_claimed(&path, &claimed) {
+                let Ok(ft) = entry.file_type() else {
+                    continue;
+                };
+                if !ft.is_dir() || ft.is_symlink() || is_path_claimed(&path, &claimed) {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name_matches_agent_keyword(&name) || has_agent_markers(&path) {
                     let id = normalize_agent_id(&name);
                     if !id.is_empty() {
-                        candidates.push((id, path, is_cache_root));
+                        candidates.push((id, path, kind));
                     }
                 }
             }
@@ -606,7 +653,7 @@ pub fn discover_unknown_agent_results(
 
     let mut grouped: BTreeMap<String, (Vec<PathBuf>, Vec<ScanItem>)> = BTreeMap::new();
 
-    for (agent_id, root_dir, is_cache_root) in candidates {
+    for (agent_id, root_dir, root_kind) in candidates {
         if let Some(filter) = agent_filter {
             if !filter.is_empty() && !filter.iter().any(|a| a == &agent_id) {
                 continue;
@@ -616,38 +663,23 @@ pub fn discover_unknown_agent_results(
         let entry = grouped.entry(agent_id.clone()).or_default();
         entry.0.push(root_dir.clone());
 
-        if is_cache_root {
-            let dir_name = root_dir
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let (cat, zh, en) = if dir_name.to_ascii_lowercase().contains("updater")
-                || dir_name.to_ascii_lowercase().contains("shipit")
-            {
-                (ScanCategory::Updater, "自动发现更新器缓存", "auto-discovered updater cache")
-            } else {
-                (ScanCategory::Cache, "自动发现系统应用缓存", "auto-discovered macOS Caches")
-            };
-            if let Some(item) = make_heuristic_item(
-                &agent_id,
-                cat,
-                &root_dir,
-                zh,
-                en,
-                exempt_hours,
-                now_ms,
-                lang,
-            ) {
-                entry.1.push(item);
-            }
-        } else {
-            let mut subdirs = Vec::new();
-            collect_safe_cleanable_subdirs(&root_dir, 0, &mut subdirs);
-            for (sub, cat, zh, en) in subdirs {
+        match root_kind {
+            DiscoveryRootKind::CacheRoot => {
+                let dir_name = root_dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let (cat, zh, en) = if dir_name.to_ascii_lowercase().contains("updater")
+                    || dir_name.to_ascii_lowercase().contains("shipit")
+                {
+                    (ScanCategory::Updater, "自动发现更新器缓存", "auto-discovered updater cache")
+                } else {
+                    (ScanCategory::Cache, "自动发现系统应用缓存", "auto-discovered application cache")
+                };
                 if let Some(item) = make_heuristic_item(
                     &agent_id,
                     cat,
-                    &sub,
+                    &root_dir,
                     zh,
                     en,
                     exempt_hours,
@@ -655,6 +687,38 @@ pub fn discover_unknown_agent_results(
                     lang,
                 ) {
                     entry.1.push(item);
+                }
+            }
+            DiscoveryRootKind::LogRoot => {
+                if let Some(item) = make_heuristic_item(
+                    &agent_id,
+                    ScanCategory::Log,
+                    &root_dir,
+                    "自动发现系统运行日志",
+                    "auto-discovered macOS Library logs",
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                ) {
+                    entry.1.push(item);
+                }
+            }
+            DiscoveryRootKind::Standard => {
+                let mut subdirs = Vec::new();
+                collect_safe_cleanable_subdirs(&root_dir, 0, &mut subdirs);
+                for (sub, cat, zh, en) in subdirs {
+                    if let Some(item) = make_heuristic_item(
+                        &agent_id,
+                        cat,
+                        &sub,
+                        zh,
+                        en,
+                        exempt_hours,
+                        now_ms,
+                        lang,
+                    ) {
+                        entry.1.push(item);
+                    }
                 }
             }
         }
@@ -727,6 +791,34 @@ pub fn discover_dynamic_mcp_configs(ctx: &CleanerContext) -> Vec<PathBuf> {
                 let p = path.join(fname);
                 if p.is_file() {
                     found.push(p);
+                }
+            }
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir(ctx.home_dir.join("Library/Application Support")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            for rel in ["claude_desktop_config.json", "User/mcp.json"] {
+                let p = path.join(rel);
+                if p.is_file() {
+                    found.push(p);
+                }
+            }
+            let global_storage = path.join("User/globalStorage");
+            for ext_id in [
+                "saoudrizwan.claude-dev",
+                "rooveterinaryinc.roo-cline",
+                "kilocode.kilo-code",
+            ] {
+                for settings_file in ["cline_mcp_settings.json", "mcp_settings.json"] {
+                    let p = global_storage.join(ext_id).join("settings").join(settings_file);
+                    if p.is_file() {
+                        found.push(p);
+                    }
                 }
             }
         }

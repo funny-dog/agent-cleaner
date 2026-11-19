@@ -12,7 +12,7 @@ DeepSeek Harness (DSH) 磁盘清理与配置自愈插件。无需离开 DSH，�
 
 ## 功能特性
 
-- **DSH 侧边栏可视化面板**：从左侧栏打开 **Agent Cleaner**，直观查看各工具磁盘占用分布，按「推荐清理 / 建议复核 / 活跃豁免（24h）」筛选，支持 Dry-Run 预演与按项勾选清理。
+- **DSH 侧边栏可视化面板**：从左侧栏打开 **Agent Cleaner**，直观查看各工具磁盘占用分布，按「推荐清理 / 建议复核 / 活跃豁免（24h）」筛选，支持按项勾选清理。
 - **内置 4 个对话工具**：向 DSH 注册 `agent_cleaner_scan`、`agent_cleaner_clean`、`agent_cleaner_doctor`、`agent_cleaner_mcp`，可以直接在对话里让 DSH 帮你干活：
   - *“帮我扫描一下各 AI 编程助手占用的冗余空间和孤儿 MCP 进程”*
   - *“检查并修复 MCP 配置文件里的死链”*

@@ -1,3 +1,4 @@
+export declare const PLUGIN_VERSION: string;
 export interface DshPluginConfig {
     binaryPath?: string;
     exemptRecentHours?: number;

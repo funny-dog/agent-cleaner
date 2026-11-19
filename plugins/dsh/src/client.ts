@@ -44,11 +44,18 @@ interface ScanResult {
   diskUsageBytes: number;
 }
 
+interface DoctorIssue {
+  id: string;
+  message: string;
+  severity?: 'error' | 'warning' | 'info';
+  autoFixable?: boolean;
+}
+
 interface DoctorReport {
   agent: string;
   path: string;
   healthy: boolean;
-  issues: Array<{ id: string; message: string }>;
+  issues: DoctorIssue[];
 }
 
 interface TrashBatch {
@@ -58,14 +65,31 @@ interface TrashBatch {
   items: Array<{ id: string; agent: string; originalPath: string; sizeBytes: number }>;
 }
 
+interface McpEntry {
+  agent: string;
+  name: string;
+  command?: string;
+  url?: string;
+  configPath?: string;
+}
+
+interface McpOrphanProcess {
+  pid: number;
+  command: string;
+  rssKb: number;
+  matchedName?: string;
+  matchedAgent?: string;
+}
+
 interface OverviewPayload {
   agents: ScanResult[];
   doctors: DoctorReport[];
   mcpAudit: {
     audit: {
       entries: unknown[];
-      deadLinks: Array<{ agent: string; name: string; command?: string }>;
-      orphanProcesses: Array<{ pid: number; command: string; rssKb: number }>;
+      deadLinks: McpEntry[];
+      duplicates?: McpEntry[][];
+      orphanProcesses: McpOrphanProcess[];
       coldCaches: Array<{ source: string; path: string; sizeBytes: number; lastAccessDays: number }>;
     };
   };
@@ -84,6 +108,9 @@ const DICT = {
     d7: '7 天',
     rescan: '刷新扫描',
     scanning: '扫描中...',
+    scanningTitle: '正在扫描 AI Agent 环境...',
+    rescanningTitle: '正在重新扫描环境...',
+    scanningSubtitle: '正在检测各工具磁盘缓存、MCP 僵尸进程与配置文件',
     totalDisk: 'Agent 总占用',
     recCard: (n: number) => `推荐清理 (${n} 项)`,
     reclaimCard: '发现可清理总量',
@@ -103,22 +130,32 @@ const DICT = {
     clearSel: '清空',
     selectedPrefix: '已勾选 ',
     selectedMid: ' 项，合计可释放 ',
-    dryRun: '预演 (Dry-Run)',
     deleteSelected: (s: string) => `删除所选到回收站 (${s})`,
     badgeRec: '推荐清理',
     badgeOpt: '建议复核',
     badgeExempt: '活跃豁免',
     noItems: '当前筛选条件下无匹配条目',
     mcpTitle: 'PPID=1 孤儿 stdio 进程',
-    killAll: '一键查杀',
+    killAll: '一键全部查杀',
+    killOne: '查杀',
     noOrphans: '暂无孤儿 MCP 进程',
+    deadLinksTitle: (n: number) => `失效 MCP 死链 (${n})`,
+    noDeadLinks: '暂无失效 MCP 死链',
+    duplicatesTitle: (n: number) => `跨 Agent 重复 MCP 配置 (${n})`,
+    coldCachesTitle: (n: number) => `冷缓存 (>14 天未访问) (${n})`,
+    noColdCaches: '暂无长期未访问的 npx / uv 冷缓存',
     doctorFix: '一键保注释修复',
     healthy: '健康',
     issueCount: (n: number) => `${n} 个问题`,
+    autoFixable: '可自动修复',
+    trashSummary: (count: number, total: string) => `共 ${count} 个还原批次，回收站总占用 ${total}`,
+    purgeAll: '一键清空回收站',
+    details: '查看明细',
+    hideDetails: '收起明细',
+    itemsUnit: (n: number) => `${n} 项`,
     restore: '原路还原',
     purge: '永久删除',
     trashEmpty: '回收站为空',
-    labelDryRun: '预演',
     labelClean: '清理',
     labelMcpKill: '查杀孤儿 MCP',
     labelDoctorFix: '保注释自愈',
@@ -135,6 +172,9 @@ const DICT = {
     d7: '7 Days',
     rescan: 'Rescan',
     scanning: 'Scanning...',
+    scanningTitle: 'Scanning AI Agent Environments...',
+    rescanningTitle: 'Rescanning Environments...',
+    scanningSubtitle: 'Inspecting disk caches, orphan MCP processes, and config files',
     totalDisk: 'Total Disk Usage',
     recCard: (n: number) => `Recommended (${n})`,
     reclaimCard: 'Total Reclaimable',
@@ -154,7 +194,6 @@ const DICT = {
     clearSel: 'Clear',
     selectedPrefix: 'Selected ',
     selectedMid: ' item(s), reclaimable ',
-    dryRun: 'Dry-Run',
     deleteSelected: (s: string) => `Move Selected to Trash (${s})`,
     badgeRec: 'Recommended',
     badgeOpt: 'Optional',
@@ -162,14 +201,25 @@ const DICT = {
     noItems: 'No matching items under current filters',
     mcpTitle: 'PPID=1 Orphan stdio Processes',
     killAll: 'Terminate All',
+    killOne: 'Kill',
     noOrphans: 'No orphan MCP processes detected',
+    deadLinksTitle: (n: number) => `Dead MCP Links (${n})`,
+    noDeadLinks: 'No dead MCP links',
+    duplicatesTitle: (n: number) => `Cross-Agent Duplicate MCPs (${n})`,
+    coldCachesTitle: (n: number) => `Cold Caches (>14d unused) (${n})`,
+    noColdCaches: 'No cold npx / uv caches',
     doctorFix: 'Auto-Heal (Preserve Comments)',
     healthy: 'Healthy',
     issueCount: (n: number) => `${n} issue(s)`,
+    autoFixable: 'Auto-fixable',
+    trashSummary: (count: number, total: string) => `${count} batch(es), total trash usage: ${total}`,
+    purgeAll: 'Purge All',
+    details: 'Details',
+    hideDetails: 'Hide',
+    itemsUnit: (n: number) => `${n} item(s)`,
     restore: 'Restore',
     purge: 'Purge',
     trashEmpty: 'Trash is empty',
-    labelDryRun: 'Dry-Run',
     labelClean: 'Clean',
     labelMcpKill: 'Kill Orphan MCP',
     labelDoctorFix: 'Config Auto-Heal',
@@ -219,6 +269,10 @@ const SCOPED_CSS = `
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #475569);
   --ac-exempt-bg: rgba(100, 116, 139, 0.12);
   --ac-exempt-border: rgba(100, 116, 139, 0.24);
+  --ac-overlay-bg: rgba(248, 250, 252, 0.78);
+  --ac-overlay-card: rgba(255, 255, 255, 0.96);
+  --ac-overlay-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.16);
+  --ac-ring-track: rgba(2, 132, 199, 0.16);
 
   height: 100%;
   display: flex;
@@ -258,6 +312,10 @@ body[data-ds-dark-theme] .ac-dsh-root {
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
   --ac-exempt-bg: rgba(148, 163, 184, 0.16);
   --ac-exempt-border: rgba(148, 163, 184, 0.22);
+  --ac-overlay-bg: rgba(6, 10, 19, 0.72);
+  --ac-overlay-card: rgba(11, 17, 32, 0.94);
+  --ac-overlay-shadow: 0 20px 44px -12px rgba(0, 0, 0, 0.55);
+  --ac-ring-track: rgba(34, 211, 238, 0.16);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -291,6 +349,10 @@ body[data-ds-dark-theme] .ac-dsh-root {
     --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
     --ac-exempt-bg: rgba(148, 163, 184, 0.16);
     --ac-exempt-border: rgba(148, 163, 184, 0.22);
+    --ac-overlay-bg: rgba(6, 10, 19, 0.72);
+    --ac-overlay-card: rgba(11, 17, 32, 0.94);
+    --ac-overlay-shadow: 0 20px 44px -12px rgba(0, 0, 0, 0.55);
+    --ac-ring-track: rgba(34, 211, 238, 0.16);
     color-scheme: dark;
   }
 }
@@ -303,11 +365,22 @@ body[data-ds-dark-theme] .ac-dsh-root {
   -webkit-app-region: drag;
   user-select: none;
 }
+.ac-header-wrap {
+  flex: none;
+  padding: 4px 24px 0;
+}
+.ac-body-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .ac-scroll-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 24px 36px;
+  padding: 0 24px 36px;
 }
 .ac-num { font-variant-numeric: tabular-nums; font-family: var(--dsh-font-family-code, ui-monospace, 'Fira Code', monospace); }
 .ac-header {
@@ -366,8 +439,77 @@ body[data-ds-dark-theme] .ac-dsh-root {
   display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
   font-size: 11px; font-weight: 600; line-height: 1.4;
 }
+@keyframes ac-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.ac-spin {
+  animation: ac-spin 0.9s linear infinite;
+}
+.ac-spin-reverse {
+  animation: ac-spin 1.25s linear infinite reverse;
+}
+.ac-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--ac-overlay-bg);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.ac-loading-card {
+  max-width: 340px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 26px 28px;
+  border-radius: 16px;
+  border: 1px solid var(--ac-accent-border);
+  background: var(--ac-overlay-card);
+  box-shadow: var(--ac-overlay-shadow);
+}
+.ac-radar {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ac-radar-outer {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 3px solid var(--ac-ring-track);
+  border-top-color: var(--ac-accent);
+}
+.ac-radar-inner {
+  position: absolute;
+  inset: 10px;
+  border-radius: 9999px;
+  border: 2px solid var(--ac-border);
+  border-bottom-color: var(--ac-accent);
+}
+.ac-radar-core {
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ac-accent-soft);
+  color: var(--ac-accent);
+  border: 1px solid var(--ac-accent-border);
+}
 @media (prefers-reduced-motion: reduce) {
   .ac-card, .ac-btn { transition: none !important; }
+  .ac-spin, .ac-spin-reverse { animation: none !important; }
 }
 `;
 
@@ -381,6 +523,47 @@ function formatBytes(bytes: number): string {
     i += 1;
   }
   return i === 0 ? `${bytes} B` : `${val.toFixed(1)} ${units[i]}`;
+}
+
+function formatTimeAgo(ms: number | null | undefined, lang: Lang): string {
+  if (!ms) return '--';
+  const diff = Math.max(0, Date.now() - ms);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return lang === 'zh' ? '刚刚' : 'just now';
+  if (mins < 60) return lang === 'zh' ? `${mins} 分钟前` : `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return lang === 'zh' ? `${hours} 小时前` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return lang === 'zh' ? `${days} 天前` : `${days}d ago`;
+}
+
+const AGENT_LABELS: Record<string, string> = {
+  claude: 'Claude Code',
+  opencode: 'OpenCode',
+  codex: 'Codex CLI',
+  dsh: 'DSH',
+  gemini: 'Gemini / Antigravity',
+  workbuddy: 'WorkBuddy',
+  qoder: 'Qoder',
+  kimi: 'Kimi',
+  kiro: 'Kiro',
+  ollama: 'Ollama',
+  aider: 'Aider',
+  cursor: 'Cursor',
+  windsurf: 'Windsurf',
+  trae: 'Trae',
+  codebuddy: 'CodeBuddy',
+  zcode: 'ZCode',
+  devin: 'Devin',
+  continue: 'Continue',
+  copilot: 'Copilot CLI',
+  zed: 'Zed',
+  'pkg-cache': 'Cold Cache (npx/uv)',
+  'cold-cache': 'Cold Cache (npx/uv)',
+};
+
+function agentLabel(agent: string): string {
+  return AGENT_LABELS[agent] ?? agent;
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -407,9 +590,11 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 function SvgIcon({
   size = 16,
   paths,
+  className,
 }: {
   size?: number;
   paths: Array<{ d: string }>;
+  className?: string;
 }) {
   return React.createElement(
     'svg',
@@ -423,6 +608,7 @@ function SvgIcon({
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
       'aria-hidden': 'true',
+      className,
       style: { flexShrink: 0 },
     },
     ...paths.map((p, idx) => React.createElement('path', { key: idx, d: p.d })),
@@ -519,6 +705,7 @@ function CleanerPanel() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [exemptHours, setExemptHours] = useState<number>(24);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedBatchIds, setExpandedBatchIds] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
 
   const t = DICT[lang];
@@ -597,19 +784,30 @@ function CleanerPanel() {
     });
   };
 
+  const toggleBatchDetails = (batchId: string) => {
+    setExpandedBatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(batchId)) next.delete(batchId);
+      else next.add(batchId);
+      return next;
+    });
+  };
+
   const runAction = async (label: string, url: string, body: unknown = {}) => {
     setBusy(true);
     setNotice(null);
     try {
       const res = await apiJson<any>(url, { method: 'POST', body: JSON.stringify(body) });
-      if (res?.dryRun) {
+      if (res?.batchId && typeof res?.restored === 'number') {
+        const failCount = Array.isArray(res.failed) ? res.failed.length : 0;
         setNotice({
-          kind: 'info',
+          kind: failCount > 0 && res.restored === 0 ? 'error' : 'info',
           text:
             lang === 'zh'
-              ? `[预演模式] 将移入回收站 ${res.cleanedCount ?? 0} 项，预计释放 ${formatBytes(res.freedBytes ?? 0)}`
-              : `[Dry-Run] Would move ${res.cleanedCount ?? 0} item(s) to trash, freeing ${formatBytes(res.freedBytes ?? 0)}`,
+              ? `原路还原完成（批次 ${String(res.batchId).slice(0, 8)}）：成功 ${res.restored} 项${failCount > 0 ? `，失败 ${failCount} 项 (${res.failed[0]})` : ''}`
+              : `Restore complete (${String(res.batchId).slice(0, 8)}): restored ${res.restored} item(s)${failCount > 0 ? `, ${failCount} failed (${res.failed[0]})` : ''}`,
         });
+        await load(exemptHours, lang, false);
       } else if (res?.batchId) {
         setNotice({
           kind: 'info',
@@ -617,6 +815,45 @@ function CleanerPanel() {
             lang === 'zh'
               ? `${label}成功：已移入回收站 ${res.cleanedCount ?? 0} 项（释放 ${formatBytes(res.freedBytes ?? 0)}），还原批次：${res.batchId}`
               : `${label} succeeded: moved ${res.cleanedCount ?? 0} item(s) (${formatBytes(res.freedBytes ?? 0)}), batchId: ${res.batchId}`,
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.fixedCount === 'number') {
+        const backups = Array.isArray(res.backupPaths) ? res.backupPaths.length : 0;
+        setNotice({
+          kind: 'info',
+          text:
+            lang === 'zh'
+              ? `配置自愈完成：共修复 ${res.fixedCount} 个问题，已自动备份 ${backups} 份原配置`
+              : `Config heal complete: fixed ${res.fixedCount} issue(s), backed up ${backups} file(s)`,
+        });
+        await load(exemptHours, lang, false);
+      } else if (Array.isArray(res?.killResults)) {
+        const total = res.killResults.length;
+        const okCount = res.killResults.filter((k: any) => k?.success).length;
+        setNotice({
+          kind: total > 0 && okCount === 0 ? 'error' : 'info',
+          text:
+            lang === 'zh'
+              ? `孤儿 MCP 查杀完成：已终止 ${okCount} / ${total} 个进程`
+              : `Orphan MCP cleanup: terminated ${okCount} / ${total} process(es)`,
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.purgedBatches === 'number') {
+        setNotice({
+          kind: 'info',
+          text:
+            lang === 'zh'
+              ? `已永久清空全部 ${res.purgedBatches} 个回收站批次`
+              : `Permanently purged all ${res.purgedBatches} trash batch(es)`,
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.purged === 'string') {
+        setNotice({
+          kind: 'info',
+          text:
+            lang === 'zh'
+              ? `已永久删除回收站批次 ${res.purged.slice(0, 8)}`
+              : `Permanently purged trash batch ${res.purged.slice(0, 8)}`,
         });
         await load(exemptHours, lang, false);
       } else {
@@ -635,12 +872,30 @@ function CleanerPanel() {
 
   const totalDisk = agents.reduce((s, a) => s + (a.diskUsageBytes || 0), 0);
   const safeTotalDisk = Math.max(1, totalDisk);
+  const diskBreakdownAgents = useMemo(
+    () =>
+      agents
+        .filter((a) => (a.diskUsageBytes || 0) > 0)
+        .sort(
+          (a, b) =>
+            (b.diskUsageBytes || 0) - (a.diskUsageBytes || 0) ||
+            (b.totalBytes || 0) - (a.totalBytes || 0) ||
+            a.agent.localeCompare(b.agent),
+        ),
+    [agents],
+  );
   const totalReclaim = agents.reduce((s, a) => s + (a.totalBytes || 0), 0);
   const recItems = allItems.filter((i) => i.recommendation === 'recommended');
   const recBytes = recItems.reduce((s, i) => s + i.sizeBytes, 0);
   const optCount = allItems.filter((i) => i.recommendation === 'optional').length;
   const exemptCount = allItems.filter((i) => i.recommendation === 'exempt').length;
-  const orphans = data?.mcpAudit?.audit?.orphanProcesses ?? [];
+  const audit = data?.mcpAudit?.audit;
+  const orphans = audit?.orphanProcesses ?? [];
+  const deadLinks = audit?.deadLinks ?? [];
+  const duplicates = audit?.duplicates ?? [];
+  const coldCaches = audit?.coldCaches ?? [];
+  const trashBatches = data?.trash ?? [];
+  const trashTotalBytes = trashBatches.reduce((s, b) => s + (b.totalBytes || 0), 0);
   const issuesCount = (data?.doctors ?? []).reduce((s, d) => s + d.issues.length, 0);
 
   return React.createElement(
@@ -649,10 +904,10 @@ function CleanerPanel() {
     React.createElement('style', null, SCOPED_CSS),
     React.createElement('div', { className: 'ac-drag-strip', 'aria-hidden': 'true' }),
 
+    // Pinned Header (blank spaces draggable; controls marked no-drag)
     React.createElement(
       'div',
-      { className: 'ac-scroll-body' },
-      // Header (blank spaces draggable; controls marked no-drag)
+      { className: 'ac-header-wrap' },
       React.createElement(
         'div',
         { className: 'ac-header' },
@@ -708,6 +963,7 @@ function CleanerPanel() {
               {
                 className: 'ac-select',
                 value: exemptHours,
+                disabled: loading || busy,
                 onChange: (e: any) => setExemptHours(Number(e.target.value)),
               },
               React.createElement('option', { value: 0 }, t.guardOff),
@@ -724,11 +980,68 @@ function CleanerPanel() {
               disabled: loading || busy,
               onClick: () => void load(exemptHours, lang, false),
             },
-            React.createElement(SvgIcon, { size: 14, paths: ICONS.refresh }),
+            React.createElement(SvgIcon, {
+              size: 14,
+              paths: ICONS.refresh,
+              className: loading ? 'ac-spin' : undefined,
+            }),
             loading ? t.scanning : t.rescan,
           ),
         ),
       ),
+    ),
+
+    React.createElement(
+      'div',
+      { className: 'ac-body-wrap' },
+      loading &&
+        React.createElement(
+          'div',
+          { className: 'ac-loading-overlay', role: 'status', 'aria-live': 'polite' },
+          React.createElement(
+            'div',
+            { className: 'ac-loading-card' },
+            React.createElement(
+              'div',
+              { className: 'ac-radar' },
+              React.createElement('div', { className: 'ac-radar-outer ac-spin' }),
+              React.createElement('div', { className: 'ac-radar-inner ac-spin-reverse' }),
+              React.createElement(
+                'div',
+                { className: 'ac-radar-core' },
+                React.createElement(SvgIcon, { size: 18, paths: ICONS.broom }),
+              ),
+            ),
+            React.createElement(
+              'div',
+              {
+                style: {
+                  marginTop: 14,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: 'var(--ac-text-primary)',
+                },
+              },
+              data ? t.rescanningTitle : t.scanningTitle,
+            ),
+            React.createElement(
+              'div',
+              {
+                style: {
+                  marginTop: 6,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: 'var(--ac-text-secondary)',
+                },
+              },
+              t.scanningSubtitle,
+            ),
+          ),
+        ),
+
+      React.createElement(
+        'div',
+        { className: 'ac-scroll-body' },
 
       // Feedback Banner
       notice &&
@@ -782,7 +1095,7 @@ function CleanerPanel() {
           React.createElement(
             'div',
             { className: 'ac-num', style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
-            formatBytes(totalDisk),
+            data ? formatBytes(totalDisk) : '--',
           ),
         ),
         React.createElement(
@@ -799,7 +1112,7 @@ function CleanerPanel() {
               className: 'ac-num',
               style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: 'var(--ac-success-text)' },
             },
-            formatBytes(recBytes),
+            data ? formatBytes(recBytes) : '--',
           ),
         ),
         React.createElement(
@@ -812,7 +1125,7 @@ function CleanerPanel() {
               className: 'ac-num',
               style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: 'var(--ac-accent)' },
             },
-            formatBytes(totalReclaim),
+            data ? formatBytes(totalReclaim) : '--',
           ),
         ),
         React.createElement(
@@ -822,7 +1135,7 @@ function CleanerPanel() {
           React.createElement(
             'div',
             { className: 'ac-num', style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
-            `${orphans.length} / ${issuesCount} / ${data?.trash?.length ?? 0}`,
+            data ? `${orphans.length} / ${issuesCount} / ${data.trash?.length ?? 0}` : '--',
           ),
         ),
       ),
@@ -884,26 +1197,24 @@ function CleanerPanel() {
                     background: 'var(--ac-track-bg)',
                   },
                 },
-                agents
-                  .filter((a) => a.diskUsageBytes > 0)
-                  .map((a, idx) =>
-                    React.createElement('button', {
-                      key: a.agent,
-                      type: 'button',
-                      title: `${a.agent}: ${formatBytes(a.diskUsageBytes)}`,
-                      onClick: () =>
-                        setAgentFilter((prev) => (prev === a.agent ? 'all' : a.agent)),
-                      style: {
-                        width: `${Math.max(1.5, (a.diskUsageBytes / safeTotalDisk) * 100)}%`,
-                        height: '100%',
-                        border: 'none',
-                        padding: 0,
-                        cursor: 'pointer',
-                        background: AGENT_COLORS[idx % AGENT_COLORS.length],
-                        opacity: agentFilter !== 'all' && agentFilter !== a.agent ? 0.3 : 1,
-                      },
-                    }),
-                  ),
+                diskBreakdownAgents.map((a, idx) =>
+                  React.createElement('button', {
+                    key: a.agent,
+                    type: 'button',
+                    title: `${agentLabel(a.agent)}: ${formatBytes(a.diskUsageBytes)}`,
+                    onClick: () =>
+                      setAgentFilter((prev) => (prev === a.agent ? 'all' : a.agent)),
+                    style: {
+                      width: `${Math.max(1.5, (a.diskUsageBytes / safeTotalDisk) * 100)}%`,
+                      height: '100%',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      background: AGENT_COLORS[idx % AGENT_COLORS.length],
+                      opacity: agentFilter !== 'all' && agentFilter !== a.agent ? 0.3 : 1,
+                    },
+                  }),
+                ),
               ),
               React.createElement(
                 'div',
@@ -916,9 +1227,7 @@ function CleanerPanel() {
                     fontSize: 11,
                   },
                 },
-                agents
-                  .filter((a) => a.diskUsageBytes > 0)
-                  .map((a, idx) =>
+                diskBreakdownAgents.map((a, idx) =>
                     React.createElement(
                       'button',
                       {
@@ -948,7 +1257,7 @@ function CleanerPanel() {
                           background: AGENT_COLORS[idx % AGENT_COLORS.length],
                         },
                       }),
-                      a.agent,
+                      agentLabel(a.agent),
                       React.createElement(
                         'span',
                         { className: 'ac-num', style: { color: 'var(--ac-text-muted)' } },
@@ -1096,39 +1405,20 @@ function CleanerPanel() {
               ),
             ),
             React.createElement(
-              'div',
-              { style: { display: 'flex', gap: 8 } },
-              React.createElement(
-                'button',
-                {
-                  className: 'ac-btn ac-btn-ghost',
-                  disabled: busy || selectedItems.length === 0,
-                  onClick: () =>
-                    void runAction(t.labelDryRun, '/agent-cleaner/api/clean', {
-                      exemptHours,
-                      lang,
-                      dryRun: true,
-                      selectedIds: selectedItems.map((i) => i.id),
-                    }),
-                },
-                t.dryRun,
-              ),
-              React.createElement(
-                'button',
-                {
-                  className: 'ac-btn ac-btn-primary',
-                  disabled: busy || selectedItems.length === 0,
-                  onClick: () =>
-                    void runAction(t.labelClean, '/agent-cleaner/api/clean', {
-                      exemptHours,
-                      lang,
-                      dryRun: false,
-                      selectedIds: selectedItems.map((i) => i.id),
-                    }),
-                },
-                React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
-                t.deleteSelected(formatBytes(selectedBytes)),
-              ),
+              'button',
+              {
+                className: 'ac-btn ac-btn-primary',
+                disabled: busy || selectedItems.length === 0,
+                onClick: () =>
+                  void runAction(t.labelClean, '/agent-cleaner/api/clean', {
+                    exemptHours,
+                    lang,
+                    dryRun: false,
+                    selectedIds: selectedItems.map((i) => i.id),
+                  }),
+              },
+              React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+              t.deleteSelected(formatBytes(selectedBytes)),
             ),
           ),
 
@@ -1170,14 +1460,14 @@ function CleanerPanel() {
                       },
                     },
                     recBadge(it.recommendation, t),
-                    React.createElement(
-                      'span',
-                      {
-                        className: 'ac-pill',
-                        style: { background: 'var(--ac-info-bg)', color: 'var(--ac-info-text)' },
-                      },
-                      it.agent,
-                    ),
+                      React.createElement(
+                        'span',
+                        {
+                          className: 'ac-pill',
+                          style: { background: 'var(--ac-info-bg)', color: 'var(--ac-info-text)' },
+                        },
+                        agentLabel(it.agent),
+                      ),
                     React.createElement('span', null, it.description),
                   ),
                   React.createElement(
@@ -1222,38 +1512,254 @@ function CleanerPanel() {
       tab === 'mcp' &&
         React.createElement(
           'div',
-          { className: 'ac-card' },
+          { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+          // Orphan Processes
           React.createElement(
             'div',
-            {
-              style: {
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 10,
-              },
-            },
-            React.createElement('strong', { style: { fontSize: 13 } }, t.mcpTitle),
-            orphans.length > 0 &&
-              React.createElement(
-                'button',
-                {
-                  className: 'ac-btn ac-btn-primary',
-                  disabled: busy,
-                  onClick: () => void runAction(t.labelMcpKill, '/agent-cleaner/api/mcp-kill'),
+            { className: 'ac-card' },
+            React.createElement(
+              'div',
+              {
+                style: {
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 10,
                 },
-                t.killAll,
-              ),
-          ),
-          orphans.length === 0
-            ? React.createElement('div', { style: { fontSize: 12, color: 'var(--ac-text-muted)' } }, t.noOrphans)
-            : orphans.map((p) =>
+              },
+              React.createElement('strong', { style: { fontSize: 13 } }, t.mcpTitle),
+              orphans.length > 0 &&
                 React.createElement(
-                  'div',
-                  { key: p.pid, className: 'ac-num', style: { fontSize: 12, marginTop: 6 } },
-                  `PID ${p.pid}: ${p.command}`,
+                  'button',
+                  {
+                    className: 'ac-btn ac-btn-primary',
+                    disabled: busy,
+                    onClick: () => void runAction(t.labelMcpKill, '/agent-cleaner/api/mcp-kill'),
+                  },
+                  t.killAll,
                 ),
+            ),
+            orphans.length === 0
+              ? React.createElement('div', { style: { fontSize: 12, color: 'var(--ac-text-muted)' } }, t.noOrphans)
+              : React.createElement(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                  orphans.map((p) => {
+                    const memMb = Math.max(1, Math.round((p.rssKb || 0) / 1024));
+                    return React.createElement(
+                      'div',
+                      {
+                        key: p.pid,
+                        style: {
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: '1px solid var(--ac-warn-border)',
+                          background: 'var(--ac-warn-bg)',
+                        },
+                      },
+                      React.createElement(
+                        'div',
+                        { style: { flex: 1, minWidth: 0 } },
+                        React.createElement(
+                          'div',
+                          {
+                            className: 'ac-num',
+                            style: {
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: 'var(--ac-warn-text)',
+                            },
+                          },
+                          `PID ${p.pid}`,
+                          p.matchedAgent &&
+                            React.createElement(
+                              'span',
+                              {
+                                className: 'ac-pill',
+                                style: { background: 'var(--ac-info-bg)', color: 'var(--ac-info-text)' },
+                              },
+                              agentLabel(p.matchedAgent),
+                            ),
+                          React.createElement(
+                            'span',
+                            null,
+                            `${p.matchedName ?? 'MCP Stdio Process'} · ${memMb} MB`,
+                          ),
+                        ),
+                        React.createElement(
+                          'div',
+                          {
+                            className: 'ac-num',
+                            style: {
+                              fontSize: 11,
+                              color: 'var(--ac-text-secondary)',
+                              marginTop: 3,
+                              wordBreak: 'break-all',
+                            },
+                          },
+                          p.command,
+                        ),
+                      ),
+                      React.createElement(
+                        'button',
+                        {
+                          className: 'ac-btn ac-btn-ghost',
+                          disabled: busy,
+                          style: { flexShrink: 0 },
+                          onClick: () =>
+                            void runAction(t.labelMcpKill, '/agent-cleaner/api/mcp-kill', {
+                              pid: p.pid,
+                            }),
+                        },
+                        t.killOne,
+                      ),
+                    );
+                  }),
+                ),
+          ),
+
+          // Dead Links
+          React.createElement(
+            'div',
+            { className: 'ac-card' },
+            React.createElement(
+              'div',
+              { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              t.deadLinksTitle(deadLinks.length),
+            ),
+            deadLinks.length === 0
+              ? React.createElement('div', { style: { fontSize: 12, color: 'var(--ac-text-muted)' } }, t.noDeadLinks)
+              : React.createElement(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                  deadLinks.map((d, idx) =>
+                    React.createElement(
+                      'div',
+                      {
+                        key: `${d.agent}:${d.name}:${idx}`,
+                        style: {
+                          padding: '7px 10px',
+                          borderRadius: 8,
+                          border: '1px solid var(--ac-danger-border)',
+                          background: 'var(--ac-danger-bg)',
+                          fontSize: 12,
+                        },
+                      },
+                      React.createElement(
+                        'div',
+                        { style: { fontWeight: 600, color: 'var(--ac-danger-text)' } },
+                        `[${agentLabel(d.agent)}] ${d.name}`,
+                      ),
+                      React.createElement(
+                        'div',
+                        {
+                          className: 'ac-num',
+                          style: { fontSize: 11, color: 'var(--ac-text-muted)', marginTop: 2, wordBreak: 'break-all' },
+                        },
+                        d.command || d.url || d.configPath || '',
+                      ),
+                    ),
+                  ),
+                ),
+          ),
+
+          // Cross-Agent Duplicates
+          duplicates.length > 0 &&
+            React.createElement(
+              'div',
+              { className: 'ac-card' },
+              React.createElement(
+                'div',
+                { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+                t.duplicatesTitle(duplicates.length),
               ),
+              React.createElement(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                duplicates.map((group, idx) => {
+                  const first = group[0];
+                  const agentsList = [...new Set(group.map((g) => agentLabel(g.agent)))].join(', ');
+                  return React.createElement(
+                    'div',
+                    {
+                      key: idx,
+                      style: {
+                        padding: '7px 10px',
+                        borderRadius: 8,
+                        border: '1px solid var(--ac-border)',
+                        fontSize: 12,
+                      },
+                    },
+                    React.createElement(
+                      'div',
+                      { style: { fontWeight: 600 } },
+                      `${first?.name ?? 'MCP'} · ${agentsList}`,
+                    ),
+                    React.createElement(
+                      'div',
+                      {
+                        className: 'ac-num',
+                        style: { fontSize: 11, color: 'var(--ac-text-muted)', marginTop: 2, wordBreak: 'break-all' },
+                      },
+                      first?.command || first?.url || '',
+                    ),
+                  );
+                }),
+              ),
+            ),
+
+          // Cold Caches
+          React.createElement(
+            'div',
+            { className: 'ac-card' },
+            React.createElement(
+              'div',
+              { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              t.coldCachesTitle(coldCaches.length),
+            ),
+            coldCaches.length === 0
+              ? React.createElement('div', { style: { fontSize: 12, color: 'var(--ac-text-muted)' } }, t.noColdCaches)
+              : React.createElement(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' } },
+                  coldCaches.map((c) =>
+                    React.createElement(
+                      'div',
+                      {
+                        key: c.path,
+                        style: {
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          border: '1px solid var(--ac-border)',
+                          fontSize: 11,
+                        },
+                      },
+                      React.createElement(
+                        'span',
+                        { className: 'ac-num', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                        `[${c.source}] ${c.path.split('/').pop()} (${c.lastAccessDays}d)`,
+                      ),
+                      React.createElement(
+                        'span',
+                        { className: 'ac-num', style: { color: 'var(--ac-text-secondary)', flexShrink: 0 } },
+                        formatBytes(c.sizeBytes),
+                      ),
+                    ),
+                  ),
+                ),
+          ),
         ),
 
       tab === 'doctor' &&
@@ -1289,7 +1795,7 @@ function CleanerPanel() {
                     fontWeight: 600,
                   },
                 },
-                React.createElement('span', null, doc.agent),
+                React.createElement('span', null, agentLabel(doc.agent)),
                 React.createElement(
                   'span',
                   { style: { color: doc.healthy ? 'var(--ac-success-text)' : 'var(--ac-warn-text)' } },
@@ -1301,13 +1807,52 @@ function CleanerPanel() {
                 { className: 'ac-num', style: { fontSize: 11, color: 'var(--ac-text-muted)', marginTop: 2 } },
                 doc.path,
               ),
-              doc.issues.map((iss) =>
-                React.createElement(
+              doc.issues.map((iss) => {
+                const sev = iss.severity ?? 'warning';
+                const sevStyle =
+                  sev === 'error'
+                    ? { background: 'var(--ac-danger-bg)', color: 'var(--ac-danger-text)', border: '1px solid var(--ac-danger-border)' }
+                    : sev === 'info'
+                      ? { background: 'var(--ac-info-bg)', color: 'var(--ac-info-text)', border: '1px solid var(--ac-border)' }
+                      : { background: 'var(--ac-warn-bg)', color: 'var(--ac-warn-text)', border: '1px solid var(--ac-warn-border)' };
+                return React.createElement(
                   'div',
-                  { key: iss.id, style: { fontSize: 12, marginTop: 6, color: 'var(--ac-warn-text)' } },
-                  iss.message,
-                ),
-              ),
+                  {
+                    key: iss.id,
+                    style: {
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      marginTop: 6,
+                    },
+                  },
+                  React.createElement(
+                    'span',
+                    { className: 'ac-pill', style: sevStyle },
+                    sev.toUpperCase(),
+                  ),
+                  iss.autoFixable &&
+                    React.createElement(
+                      'span',
+                      {
+                        className: 'ac-pill',
+                        style: {
+                          background: 'var(--ac-success-bg)',
+                          color: 'var(--ac-success-text)',
+                          border: '1px solid var(--ac-success-border)',
+                        },
+                      },
+                      t.autoFixable,
+                    ),
+                  React.createElement(
+                    'span',
+                    { style: { color: sev === 'error' ? 'var(--ac-danger-text)' : 'var(--ac-warn-text)' } },
+                    iss.message,
+                  ),
+                );
+              }),
             ),
           ),
         ),
@@ -1316,14 +1861,14 @@ function CleanerPanel() {
         React.createElement(
           'div',
           { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-          (data?.trash ?? []).map((b) =>
+          trashBatches.length > 0 &&
             React.createElement(
               'div',
               {
-                key: b.batchId,
                 className: 'ac-card',
                 style: {
                   display: 'flex',
+                  flexWrap: 'wrap',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   gap: 10,
@@ -1331,52 +1876,140 @@ function CleanerPanel() {
               },
               React.createElement(
                 'div',
-                { className: 'ac-num', style: { fontSize: 12 } },
-                React.createElement(
-                  'strong',
-                  { style: { color: 'var(--ac-accent)' } },
-                  b.batchId.slice(0, 8),
-                ),
-                ` · ${b.items.length} · ${formatBytes(b.totalBytes)}`,
+                { className: 'ac-num', style: { fontSize: 12, color: 'var(--ac-text-secondary)' } },
+                t.trashSummary(trashBatches.length, formatBytes(trashTotalBytes)),
               ),
               React.createElement(
-                'div',
-                { style: { display: 'flex', gap: 6 } },
-                React.createElement(
-                  'button',
-                  {
-                    className: 'ac-btn ac-btn-ghost',
-                    disabled: busy,
-                    onClick: () =>
-                      void runAction(t.labelRestore, '/agent-cleaner/api/restore', {
-                        batchId: b.batchId,
-                      }),
+                'button',
+                {
+                  className: 'ac-btn ac-btn-ghost',
+                  disabled: busy,
+                  style: {
+                    borderColor: 'var(--ac-danger-border)',
+                    color: 'var(--ac-danger-text)',
                   },
-                  React.createElement(SvgIcon, { size: 13, paths: ICONS.restore }),
-                  t.restore,
-                ),
-                React.createElement(
-                  'button',
-                  {
-                    className: 'ac-btn ac-btn-ghost',
-                    disabled: busy,
-                    onClick: () =>
-                      void runAction(t.labelPurge, '/agent-cleaner/api/purge', {
-                        batchId: b.batchId,
-                      }),
-                  },
-                  t.purge,
-                ),
+                  onClick: () =>
+                    void runAction(t.labelPurge, '/agent-cleaner/api/purge', { all: true }),
+                },
+                React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+                t.purgeAll,
               ),
             ),
-          ),
-          (!data?.trash || data.trash.length === 0) &&
+          trashBatches.map((b) => {
+            const expanded = expandedBatchIds.has(b.batchId);
+            return React.createElement(
+              'div',
+              { key: b.batchId, className: 'ac-card' },
+              React.createElement(
+                'div',
+                {
+                  style: {
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 10,
+                  },
+                },
+                React.createElement(
+                  'div',
+                  { className: 'ac-num', style: { fontSize: 12 } },
+                  React.createElement(
+                    'strong',
+                    { style: { color: 'var(--ac-accent)' } },
+                    b.batchId.slice(0, 8),
+                  ),
+                  ` · ${formatTimeAgo(b.timestamp, lang)} · ${t.itemsUnit(b.items.length)} · ${formatBytes(b.totalBytes)}`,
+                ),
+                React.createElement(
+                  'div',
+                  { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                  React.createElement(
+                    'button',
+                    {
+                      className: 'ac-btn ac-btn-ghost',
+                      onClick: () => toggleBatchDetails(b.batchId),
+                    },
+                    expanded ? t.hideDetails : t.details,
+                  ),
+                  React.createElement(
+                    'button',
+                    {
+                      className: 'ac-btn ac-btn-ghost',
+                      disabled: busy,
+                      onClick: () =>
+                        void runAction(t.labelRestore, '/agent-cleaner/api/restore', {
+                          batchId: b.batchId,
+                        }),
+                    },
+                    React.createElement(SvgIcon, { size: 13, paths: ICONS.restore }),
+                    t.restore,
+                  ),
+                  React.createElement(
+                    'button',
+                    {
+                      className: 'ac-btn ac-btn-ghost',
+                      disabled: busy,
+                      onClick: () =>
+                        void runAction(t.labelPurge, '/agent-cleaner/api/purge', {
+                          batchId: b.batchId,
+                        }),
+                    },
+                    t.purge,
+                  ),
+                ),
+              ),
+              expanded &&
+                React.createElement(
+                  'div',
+                  {
+                    style: {
+                      marginTop: 10,
+                      paddingTop: 8,
+                      borderTop: '1px solid var(--ac-border)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    },
+                  },
+                  b.items.map((item) =>
+                    React.createElement(
+                      'div',
+                      {
+                        key: item.id,
+                        className: 'ac-num',
+                        style: {
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 10,
+                          fontSize: 11,
+                          color: 'var(--ac-text-secondary)',
+                        },
+                      },
+                      React.createElement(
+                        'span',
+                        { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                        `[${agentLabel(item.agent)}] ${item.originalPath}`,
+                      ),
+                      React.createElement(
+                        'span',
+                        { style: { flexShrink: 0, color: 'var(--ac-text-muted)' } },
+                        formatBytes(item.sizeBytes),
+                      ),
+                    ),
+                  ),
+                ),
+            );
+          }),
+          trashBatches.length === 0 &&
             React.createElement(
               'div',
               { className: 'ac-card', style: { fontSize: 12, color: 'var(--ac-text-muted)' } },
               t.trashEmpty,
             ),
         ),
+      ),
     ),
   );
 }

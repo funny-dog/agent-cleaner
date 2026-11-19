@@ -67,6 +67,9 @@ var DICT = {
     d7: "7 \u5929",
     rescan: "\u5237\u65B0\u626B\u63CF",
     scanning: "\u626B\u63CF\u4E2D...",
+    scanningTitle: "\u6B63\u5728\u626B\u63CF AI Agent \u73AF\u5883...",
+    rescanningTitle: "\u6B63\u5728\u91CD\u65B0\u626B\u63CF\u73AF\u5883...",
+    scanningSubtitle: "\u6B63\u5728\u68C0\u6D4B\u5404\u5DE5\u5177\u78C1\u76D8\u7F13\u5B58\u3001MCP \u50F5\u5C38\u8FDB\u7A0B\u4E0E\u914D\u7F6E\u6587\u4EF6",
     totalDisk: "Agent \u603B\u5360\u7528",
     recCard: (n) => `\u63A8\u8350\u6E05\u7406 (${n} \u9879)`,
     reclaimCard: "\u53D1\u73B0\u53EF\u6E05\u7406\u603B\u91CF",
@@ -86,22 +89,32 @@ var DICT = {
     clearSel: "\u6E05\u7A7A",
     selectedPrefix: "\u5DF2\u52FE\u9009 ",
     selectedMid: " \u9879\uFF0C\u5408\u8BA1\u53EF\u91CA\u653E ",
-    dryRun: "\u9884\u6F14 (Dry-Run)",
     deleteSelected: (s) => `\u5220\u9664\u6240\u9009\u5230\u56DE\u6536\u7AD9 (${s})`,
     badgeRec: "\u63A8\u8350\u6E05\u7406",
     badgeOpt: "\u5EFA\u8BAE\u590D\u6838",
     badgeExempt: "\u6D3B\u8DC3\u8C41\u514D",
     noItems: "\u5F53\u524D\u7B5B\u9009\u6761\u4EF6\u4E0B\u65E0\u5339\u914D\u6761\u76EE",
     mcpTitle: "PPID=1 \u5B64\u513F stdio \u8FDB\u7A0B",
-    killAll: "\u4E00\u952E\u67E5\u6740",
+    killAll: "\u4E00\u952E\u5168\u90E8\u67E5\u6740",
+    killOne: "\u67E5\u6740",
     noOrphans: "\u6682\u65E0\u5B64\u513F MCP \u8FDB\u7A0B",
+    deadLinksTitle: (n) => `\u5931\u6548 MCP \u6B7B\u94FE (${n})`,
+    noDeadLinks: "\u6682\u65E0\u5931\u6548 MCP \u6B7B\u94FE",
+    duplicatesTitle: (n) => `\u8DE8 Agent \u91CD\u590D MCP \u914D\u7F6E (${n})`,
+    coldCachesTitle: (n) => `\u51B7\u7F13\u5B58 (>14 \u5929\u672A\u8BBF\u95EE) (${n})`,
+    noColdCaches: "\u6682\u65E0\u957F\u671F\u672A\u8BBF\u95EE\u7684 npx / uv \u51B7\u7F13\u5B58",
     doctorFix: "\u4E00\u952E\u4FDD\u6CE8\u91CA\u4FEE\u590D",
     healthy: "\u5065\u5EB7",
     issueCount: (n) => `${n} \u4E2A\u95EE\u9898`,
+    autoFixable: "\u53EF\u81EA\u52A8\u4FEE\u590D",
+    trashSummary: (count, total) => `\u5171 ${count} \u4E2A\u8FD8\u539F\u6279\u6B21\uFF0C\u56DE\u6536\u7AD9\u603B\u5360\u7528 ${total}`,
+    purgeAll: "\u4E00\u952E\u6E05\u7A7A\u56DE\u6536\u7AD9",
+    details: "\u67E5\u770B\u660E\u7EC6",
+    hideDetails: "\u6536\u8D77\u660E\u7EC6",
+    itemsUnit: (n) => `${n} \u9879`,
     restore: "\u539F\u8DEF\u8FD8\u539F",
     purge: "\u6C38\u4E45\u5220\u9664",
     trashEmpty: "\u56DE\u6536\u7AD9\u4E3A\u7A7A",
-    labelDryRun: "\u9884\u6F14",
     labelClean: "\u6E05\u7406",
     labelMcpKill: "\u67E5\u6740\u5B64\u513F MCP",
     labelDoctorFix: "\u4FDD\u6CE8\u91CA\u81EA\u6108",
@@ -118,6 +131,9 @@ var DICT = {
     d7: "7 Days",
     rescan: "Rescan",
     scanning: "Scanning...",
+    scanningTitle: "Scanning AI Agent Environments...",
+    rescanningTitle: "Rescanning Environments...",
+    scanningSubtitle: "Inspecting disk caches, orphan MCP processes, and config files",
     totalDisk: "Total Disk Usage",
     recCard: (n) => `Recommended (${n})`,
     reclaimCard: "Total Reclaimable",
@@ -137,7 +153,6 @@ var DICT = {
     clearSel: "Clear",
     selectedPrefix: "Selected ",
     selectedMid: " item(s), reclaimable ",
-    dryRun: "Dry-Run",
     deleteSelected: (s) => `Move Selected to Trash (${s})`,
     badgeRec: "Recommended",
     badgeOpt: "Optional",
@@ -145,14 +160,25 @@ var DICT = {
     noItems: "No matching items under current filters",
     mcpTitle: "PPID=1 Orphan stdio Processes",
     killAll: "Terminate All",
+    killOne: "Kill",
     noOrphans: "No orphan MCP processes detected",
+    deadLinksTitle: (n) => `Dead MCP Links (${n})`,
+    noDeadLinks: "No dead MCP links",
+    duplicatesTitle: (n) => `Cross-Agent Duplicate MCPs (${n})`,
+    coldCachesTitle: (n) => `Cold Caches (>14d unused) (${n})`,
+    noColdCaches: "No cold npx / uv caches",
     doctorFix: "Auto-Heal (Preserve Comments)",
     healthy: "Healthy",
     issueCount: (n) => `${n} issue(s)`,
+    autoFixable: "Auto-fixable",
+    trashSummary: (count, total) => `${count} batch(es), total trash usage: ${total}`,
+    purgeAll: "Purge All",
+    details: "Details",
+    hideDetails: "Hide",
+    itemsUnit: (n) => `${n} item(s)`,
     restore: "Restore",
     purge: "Purge",
     trashEmpty: "Trash is empty",
-    labelDryRun: "Dry-Run",
     labelClean: "Clean",
     labelMcpKill: "Kill Orphan MCP",
     labelDoctorFix: "Config Auto-Heal",
@@ -200,6 +226,10 @@ var SCOPED_CSS = `
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #475569);
   --ac-exempt-bg: rgba(100, 116, 139, 0.12);
   --ac-exempt-border: rgba(100, 116, 139, 0.24);
+  --ac-overlay-bg: rgba(248, 250, 252, 0.78);
+  --ac-overlay-card: rgba(255, 255, 255, 0.96);
+  --ac-overlay-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.16);
+  --ac-ring-track: rgba(2, 132, 199, 0.16);
 
   height: 100%;
   display: flex;
@@ -239,6 +269,10 @@ body[data-ds-dark-theme] .ac-dsh-root {
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
   --ac-exempt-bg: rgba(148, 163, 184, 0.16);
   --ac-exempt-border: rgba(148, 163, 184, 0.22);
+  --ac-overlay-bg: rgba(6, 10, 19, 0.72);
+  --ac-overlay-card: rgba(11, 17, 32, 0.94);
+  --ac-overlay-shadow: 0 20px 44px -12px rgba(0, 0, 0, 0.55);
+  --ac-ring-track: rgba(34, 211, 238, 0.16);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -272,6 +306,10 @@ body[data-ds-dark-theme] .ac-dsh-root {
     --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
     --ac-exempt-bg: rgba(148, 163, 184, 0.16);
     --ac-exempt-border: rgba(148, 163, 184, 0.22);
+    --ac-overlay-bg: rgba(6, 10, 19, 0.72);
+    --ac-overlay-card: rgba(11, 17, 32, 0.94);
+    --ac-overlay-shadow: 0 20px 44px -12px rgba(0, 0, 0, 0.55);
+    --ac-ring-track: rgba(34, 211, 238, 0.16);
     color-scheme: dark;
   }
 }
@@ -284,11 +322,22 @@ body[data-ds-dark-theme] .ac-dsh-root {
   -webkit-app-region: drag;
   user-select: none;
 }
+.ac-header-wrap {
+  flex: none;
+  padding: 4px 24px 0;
+}
+.ac-body-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .ac-scroll-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 24px 36px;
+  padding: 0 24px 36px;
 }
 .ac-num { font-variant-numeric: tabular-nums; font-family: var(--dsh-font-family-code, ui-monospace, 'Fira Code', monospace); }
 .ac-header {
@@ -347,8 +396,77 @@ body[data-ds-dark-theme] .ac-dsh-root {
   display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
   font-size: 11px; font-weight: 600; line-height: 1.4;
 }
+@keyframes ac-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.ac-spin {
+  animation: ac-spin 0.9s linear infinite;
+}
+.ac-spin-reverse {
+  animation: ac-spin 1.25s linear infinite reverse;
+}
+.ac-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--ac-overlay-bg);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.ac-loading-card {
+  max-width: 340px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 26px 28px;
+  border-radius: 16px;
+  border: 1px solid var(--ac-accent-border);
+  background: var(--ac-overlay-card);
+  box-shadow: var(--ac-overlay-shadow);
+}
+.ac-radar {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ac-radar-outer {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 3px solid var(--ac-ring-track);
+  border-top-color: var(--ac-accent);
+}
+.ac-radar-inner {
+  position: absolute;
+  inset: 10px;
+  border-radius: 9999px;
+  border: 2px solid var(--ac-border);
+  border-bottom-color: var(--ac-accent);
+}
+.ac-radar-core {
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ac-accent-soft);
+  color: var(--ac-accent);
+  border: 1px solid var(--ac-accent-border);
+}
 @media (prefers-reduced-motion: reduce) {
   .ac-card, .ac-btn { transition: none !important; }
+  .ac-spin, .ac-spin-reverse { animation: none !important; }
 }
 `;
 function formatBytes(bytes) {
@@ -361,6 +479,44 @@ function formatBytes(bytes) {
     i += 1;
   }
   return i === 0 ? `${bytes} B` : `${val.toFixed(1)} ${units[i]}`;
+}
+function formatTimeAgo(ms, lang) {
+  if (!ms) return "--";
+  const diff = Math.max(0, Date.now() - ms);
+  const mins = Math.floor(diff / 6e4);
+  if (mins < 1) return lang === "zh" ? "\u521A\u521A" : "just now";
+  if (mins < 60) return lang === "zh" ? `${mins} \u5206\u949F\u524D` : `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return lang === "zh" ? `${hours} \u5C0F\u65F6\u524D` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return lang === "zh" ? `${days} \u5929\u524D` : `${days}d ago`;
+}
+var AGENT_LABELS = {
+  claude: "Claude Code",
+  opencode: "OpenCode",
+  codex: "Codex CLI",
+  dsh: "DSH",
+  gemini: "Gemini / Antigravity",
+  workbuddy: "WorkBuddy",
+  qoder: "Qoder",
+  kimi: "Kimi",
+  kiro: "Kiro",
+  ollama: "Ollama",
+  aider: "Aider",
+  cursor: "Cursor",
+  windsurf: "Windsurf",
+  trae: "Trae",
+  codebuddy: "CodeBuddy",
+  zcode: "ZCode",
+  devin: "Devin",
+  continue: "Continue",
+  copilot: "Copilot CLI",
+  zed: "Zed",
+  "pkg-cache": "Cold Cache (npx/uv)",
+  "cold-cache": "Cold Cache (npx/uv)"
+};
+function agentLabel(agent) {
+  return AGENT_LABELS[agent] ?? agent;
 }
 async function apiJson(url, init) {
   const res = await fetch(url, {
@@ -383,7 +539,8 @@ async function apiJson(url, init) {
 }
 function SvgIcon({
   size = 16,
-  paths
+  paths,
+  className
 }) {
   return import_react.default.createElement(
     "svg",
@@ -397,6 +554,7 @@ function SvgIcon({
       strokeLinecap: "round",
       strokeLinejoin: "round",
       "aria-hidden": "true",
+      className,
       style: { flexShrink: 0 }
     },
     ...paths.map((p, idx) => import_react.default.createElement("path", { key: idx, d: p.d }))
@@ -490,6 +648,7 @@ function CleanerPanel() {
   const [searchQuery, setSearchQuery] = (0, import_react.useState)("");
   const [exemptHours, setExemptHours] = (0, import_react.useState)(24);
   const [selectedIds, setSelectedIds] = (0, import_react.useState)(/* @__PURE__ */ new Set());
+  const [expandedBatchIds, setExpandedBatchIds] = (0, import_react.useState)(/* @__PURE__ */ new Set());
   const [notice, setNotice] = (0, import_react.useState)(null);
   const t = DICT[lang];
   const load = (0, import_react.useCallback)(
@@ -550,20 +709,57 @@ function CleanerPanel() {
       return next;
     });
   };
+  const toggleBatchDetails = (batchId) => {
+    setExpandedBatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(batchId)) next.delete(batchId);
+      else next.add(batchId);
+      return next;
+    });
+  };
   const runAction = async (label, url, body = {}) => {
     setBusy(true);
     setNotice(null);
     try {
       const res = await apiJson(url, { method: "POST", body: JSON.stringify(body) });
-      if (res?.dryRun) {
+      if (res?.batchId && typeof res?.restored === "number") {
+        const failCount = Array.isArray(res.failed) ? res.failed.length : 0;
         setNotice({
-          kind: "info",
-          text: lang === "zh" ? `[\u9884\u6F14\u6A21\u5F0F] \u5C06\u79FB\u5165\u56DE\u6536\u7AD9 ${res.cleanedCount ?? 0} \u9879\uFF0C\u9884\u8BA1\u91CA\u653E ${formatBytes(res.freedBytes ?? 0)}` : `[Dry-Run] Would move ${res.cleanedCount ?? 0} item(s) to trash, freeing ${formatBytes(res.freedBytes ?? 0)}`
+          kind: failCount > 0 && res.restored === 0 ? "error" : "info",
+          text: lang === "zh" ? `\u539F\u8DEF\u8FD8\u539F\u5B8C\u6210\uFF08\u6279\u6B21 ${String(res.batchId).slice(0, 8)}\uFF09\uFF1A\u6210\u529F ${res.restored} \u9879${failCount > 0 ? `\uFF0C\u5931\u8D25 ${failCount} \u9879 (${res.failed[0]})` : ""}` : `Restore complete (${String(res.batchId).slice(0, 8)}): restored ${res.restored} item(s)${failCount > 0 ? `, ${failCount} failed (${res.failed[0]})` : ""}`
         });
+        await load(exemptHours, lang, false);
       } else if (res?.batchId) {
         setNotice({
           kind: "info",
           text: lang === "zh" ? `${label}\u6210\u529F\uFF1A\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9 ${res.cleanedCount ?? 0} \u9879\uFF08\u91CA\u653E ${formatBytes(res.freedBytes ?? 0)}\uFF09\uFF0C\u8FD8\u539F\u6279\u6B21\uFF1A${res.batchId}` : `${label} succeeded: moved ${res.cleanedCount ?? 0} item(s) (${formatBytes(res.freedBytes ?? 0)}), batchId: ${res.batchId}`
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.fixedCount === "number") {
+        const backups = Array.isArray(res.backupPaths) ? res.backupPaths.length : 0;
+        setNotice({
+          kind: "info",
+          text: lang === "zh" ? `\u914D\u7F6E\u81EA\u6108\u5B8C\u6210\uFF1A\u5171\u4FEE\u590D ${res.fixedCount} \u4E2A\u95EE\u9898\uFF0C\u5DF2\u81EA\u52A8\u5907\u4EFD ${backups} \u4EFD\u539F\u914D\u7F6E` : `Config heal complete: fixed ${res.fixedCount} issue(s), backed up ${backups} file(s)`
+        });
+        await load(exemptHours, lang, false);
+      } else if (Array.isArray(res?.killResults)) {
+        const total = res.killResults.length;
+        const okCount = res.killResults.filter((k) => k?.success).length;
+        setNotice({
+          kind: total > 0 && okCount === 0 ? "error" : "info",
+          text: lang === "zh" ? `\u5B64\u513F MCP \u67E5\u6740\u5B8C\u6210\uFF1A\u5DF2\u7EC8\u6B62 ${okCount} / ${total} \u4E2A\u8FDB\u7A0B` : `Orphan MCP cleanup: terminated ${okCount} / ${total} process(es)`
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.purgedBatches === "number") {
+        setNotice({
+          kind: "info",
+          text: lang === "zh" ? `\u5DF2\u6C38\u4E45\u6E05\u7A7A\u5168\u90E8 ${res.purgedBatches} \u4E2A\u56DE\u6536\u7AD9\u6279\u6B21` : `Permanently purged all ${res.purgedBatches} trash batch(es)`
+        });
+        await load(exemptHours, lang, false);
+      } else if (typeof res?.purged === "string") {
+        setNotice({
+          kind: "info",
+          text: lang === "zh" ? `\u5DF2\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u6279\u6B21 ${res.purged.slice(0, 8)}` : `Permanently purged trash batch ${res.purged.slice(0, 8)}`
         });
         await load(exemptHours, lang, false);
       } else {
@@ -581,22 +777,34 @@ function CleanerPanel() {
   };
   const totalDisk = agents.reduce((s, a) => s + (a.diskUsageBytes || 0), 0);
   const safeTotalDisk = Math.max(1, totalDisk);
+  const diskBreakdownAgents = (0, import_react.useMemo)(
+    () => agents.filter((a) => (a.diskUsageBytes || 0) > 0).sort(
+      (a, b) => (b.diskUsageBytes || 0) - (a.diskUsageBytes || 0) || (b.totalBytes || 0) - (a.totalBytes || 0) || a.agent.localeCompare(b.agent)
+    ),
+    [agents]
+  );
   const totalReclaim = agents.reduce((s, a) => s + (a.totalBytes || 0), 0);
   const recItems = allItems.filter((i) => i.recommendation === "recommended");
   const recBytes = recItems.reduce((s, i) => s + i.sizeBytes, 0);
   const optCount = allItems.filter((i) => i.recommendation === "optional").length;
   const exemptCount = allItems.filter((i) => i.recommendation === "exempt").length;
-  const orphans = data?.mcpAudit?.audit?.orphanProcesses ?? [];
+  const audit = data?.mcpAudit?.audit;
+  const orphans = audit?.orphanProcesses ?? [];
+  const deadLinks = audit?.deadLinks ?? [];
+  const duplicates = audit?.duplicates ?? [];
+  const coldCaches = audit?.coldCaches ?? [];
+  const trashBatches = data?.trash ?? [];
+  const trashTotalBytes = trashBatches.reduce((s, b) => s + (b.totalBytes || 0), 0);
   const issuesCount = (data?.doctors ?? []).reduce((s, d) => s + d.issues.length, 0);
   return import_react.default.createElement(
     "div",
     { className: "ac-dsh-root" },
     import_react.default.createElement("style", null, SCOPED_CSS),
     import_react.default.createElement("div", { className: "ac-drag-strip", "aria-hidden": "true" }),
+    // Pinned Header (blank spaces draggable; controls marked no-drag)
     import_react.default.createElement(
       "div",
-      { className: "ac-scroll-body" },
-      // Header (blank spaces draggable; controls marked no-drag)
+      { className: "ac-header-wrap" },
       import_react.default.createElement(
         "div",
         { className: "ac-header" },
@@ -652,6 +860,7 @@ function CleanerPanel() {
               {
                 className: "ac-select",
                 value: exemptHours,
+                disabled: loading || busy,
                 onChange: (e) => setExemptHours(Number(e.target.value))
               },
               import_react.default.createElement("option", { value: 0 }, t.guardOff),
@@ -668,363 +877,400 @@ function CleanerPanel() {
               disabled: loading || busy,
               onClick: () => void load(exemptHours, lang, false)
             },
-            import_react.default.createElement(SvgIcon, { size: 14, paths: ICONS.refresh }),
+            import_react.default.createElement(SvgIcon, {
+              size: 14,
+              paths: ICONS.refresh,
+              className: loading ? "ac-spin" : void 0
+            }),
             loading ? t.scanning : t.rescan
           )
         )
-      ),
-      // Feedback Banner
-      notice && import_react.default.createElement(
+      )
+    ),
+    import_react.default.createElement(
+      "div",
+      { className: "ac-body-wrap" },
+      loading && import_react.default.createElement(
         "div",
-        {
-          role: "alert",
-          className: "ac-card",
-          style: {
-            marginBottom: 14,
-            borderColor: notice.kind === "error" ? "var(--ac-danger-border)" : "var(--ac-accent-border)",
-            background: notice.kind === "error" ? "var(--ac-danger-bg)" : "var(--ac-accent-soft)",
-            color: notice.kind === "error" ? "var(--ac-danger-text)" : "var(--ac-text-primary)",
-            fontSize: 12,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10
-          }
-        },
-        import_react.default.createElement("span", null, notice.text),
-        import_react.default.createElement(
-          "button",
-          {
-            className: "ac-btn ac-btn-ghost",
-            style: { padding: 4 },
-            "aria-label": "Close",
-            onClick: () => setNotice(null)
-          },
-          import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.close })
-        )
-      ),
-      // KPI Cards
-      import_react.default.createElement(
-        "div",
-        {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 10,
-            marginBottom: 14
-          }
-        },
+        { className: "ac-loading-overlay", role: "status", "aria-live": "polite" },
         import_react.default.createElement(
           "div",
-          { className: "ac-card" },
-          import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.totalDisk),
+          { className: "ac-loading-card" },
           import_react.default.createElement(
             "div",
-            { className: "ac-num", style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
-            formatBytes(totalDisk)
-          )
-        ),
-        import_react.default.createElement(
-          "div",
-          { className: "ac-card", style: { borderColor: "var(--ac-success-border)" } },
-          import_react.default.createElement(
-            "div",
-            { style: { fontSize: 11, color: "var(--ac-text-muted)" } },
-            t.recCard(recItems.length)
-          ),
-          import_react.default.createElement(
-            "div",
-            {
-              className: "ac-num",
-              style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: "var(--ac-success-text)" }
-            },
-            formatBytes(recBytes)
-          )
-        ),
-        import_react.default.createElement(
-          "div",
-          { className: "ac-card" },
-          import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.reclaimCard),
-          import_react.default.createElement(
-            "div",
-            {
-              className: "ac-num",
-              style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: "var(--ac-accent)" }
-            },
-            formatBytes(totalReclaim)
-          )
-        ),
-        import_react.default.createElement(
-          "div",
-          { className: "ac-card" },
-          import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.statusCard),
-          import_react.default.createElement(
-            "div",
-            { className: "ac-num", style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
-            `${orphans.length} / ${issuesCount} / ${data?.trash?.length ?? 0}`
-          )
-        )
-      ),
-      // Tabs
-      import_react.default.createElement(
-        "div",
-        { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 } },
-        ["scan", "mcp", "doctor", "trash"].map(
-          (k) => import_react.default.createElement(
-            "button",
-            {
-              key: k,
-              className: `ac-btn ${tab === k ? "ac-btn-primary" : "ac-btn-ghost"}`,
-              onClick: () => setTab(k)
-            },
-            k === "scan" ? t.tabScan(allItems.length) : k === "mcp" ? t.tabMcp(orphans.length) : k === "doctor" ? t.tabDoctor(issuesCount) : t.tabTrash(data?.trash?.length ?? 0)
-          )
-        )
-      ),
-      tab === "scan" && import_react.default.createElement(
-        "div",
-        { style: { display: "flex", flexDirection: "column", gap: 10 } },
-        agents.length > 0 && import_react.default.createElement(
-          "div",
-          { className: "ac-card" },
-          import_react.default.createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 11,
-                color: "var(--ac-text-secondary)",
-                marginBottom: 8
-              }
-            },
-            import_react.default.createElement("span", null, t.breakdownTitle),
-            import_react.default.createElement("span", { className: "ac-num" }, formatBytes(totalDisk))
-          ),
-          import_react.default.createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                height: 8,
-                width: "100%",
-                borderRadius: 999,
-                overflow: "hidden",
-                background: "var(--ac-track-bg)"
-              }
-            },
-            agents.filter((a) => a.diskUsageBytes > 0).map(
-              (a, idx) => import_react.default.createElement("button", {
-                key: a.agent,
-                type: "button",
-                title: `${a.agent}: ${formatBytes(a.diskUsageBytes)}`,
-                onClick: () => setAgentFilter((prev) => prev === a.agent ? "all" : a.agent),
-                style: {
-                  width: `${Math.max(1.5, a.diskUsageBytes / safeTotalDisk * 100)}%`,
-                  height: "100%",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  background: AGENT_COLORS[idx % AGENT_COLORS.length],
-                  opacity: agentFilter !== "all" && agentFilter !== a.agent ? 0.3 : 1
-                }
-              })
+            { className: "ac-radar" },
+            import_react.default.createElement("div", { className: "ac-radar-outer ac-spin" }),
+            import_react.default.createElement("div", { className: "ac-radar-inner ac-spin-reverse" }),
+            import_react.default.createElement(
+              "div",
+              { className: "ac-radar-core" },
+              import_react.default.createElement(SvgIcon, { size: 18, paths: ICONS.broom })
             )
           ),
           import_react.default.createElement(
             "div",
             {
               style: {
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 10,
-                marginTop: 8,
-                fontSize: 11
+                marginTop: 14,
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--ac-text-primary)"
               }
             },
-            agents.filter((a) => a.diskUsageBytes > 0).map(
-              (a, idx) => import_react.default.createElement(
-                "button",
-                {
-                  key: a.agent,
-                  type: "button",
-                  onClick: () => setAgentFilter((prev) => prev === a.agent ? "all" : a.agent),
-                  style: {
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    border: "none",
-                    background: agentFilter === a.agent ? "var(--ac-active-bg)" : "transparent",
-                    color: "inherit",
-                    borderRadius: 6,
-                    padding: "2px 6px",
-                    cursor: "pointer",
-                    fontSize: 11
-                  }
-                },
-                import_react.default.createElement("span", {
-                  style: {
-                    width: 7,
-                    height: 7,
-                    borderRadius: 999,
-                    background: AGENT_COLORS[idx % AGENT_COLORS.length]
-                  }
-                }),
-                a.agent,
-                import_react.default.createElement(
-                  "span",
-                  { className: "ac-num", style: { color: "var(--ac-text-muted)" } },
-                  formatBytes(a.diskUsageBytes)
-                )
-              )
-            )
+            data ? t.rescanningTitle : t.scanningTitle
+          ),
+          import_react.default.createElement(
+            "div",
+            {
+              style: {
+                marginTop: 6,
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: "var(--ac-text-secondary)"
+              }
+            },
+            t.scanningSubtitle
           )
-        ),
-        // Filter + Search + Selection Toolbar
-        import_react.default.createElement(
+        )
+      ),
+      import_react.default.createElement(
+        "div",
+        { className: "ac-scroll-body" },
+        // Feedback Banner
+        notice && import_react.default.createElement(
           "div",
           {
+            role: "alert",
             className: "ac-card",
             style: {
+              marginBottom: 14,
+              borderColor: notice.kind === "error" ? "var(--ac-danger-border)" : "var(--ac-accent-border)",
+              background: notice.kind === "error" ? "var(--ac-danger-bg)" : "var(--ac-accent-soft)",
+              color: notice.kind === "error" ? "var(--ac-danger-text)" : "var(--ac-text-primary)",
+              fontSize: 12,
               display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
+              justifyContent: "space-between",
               alignItems: "center",
-              justifyContent: "space-between"
+              gap: 10
+            }
+          },
+          import_react.default.createElement("span", null, notice.text),
+          import_react.default.createElement(
+            "button",
+            {
+              className: "ac-btn ac-btn-ghost",
+              style: { padding: 4 },
+              "aria-label": "Close",
+              onClick: () => setNotice(null)
+            },
+            import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.close })
+          )
+        ),
+        // KPI Cards
+        import_react.default.createElement(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 10,
+              marginBottom: 14
             }
           },
           import_react.default.createElement(
             "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" } },
-            [
-              ["all", t.filterAll(allItems.length)],
-              ["recommended", t.filterRec(recItems.length)],
-              ["optional", t.filterOpt(optCount)],
-              ["exempt", t.filterExempt(exemptCount)]
-            ].map(
-              ([k, label]) => import_react.default.createElement(
-                "button",
-                {
-                  key: k,
-                  className: "ac-btn ac-btn-ghost",
+            { className: "ac-card" },
+            import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.totalDisk),
+            import_react.default.createElement(
+              "div",
+              { className: "ac-num", style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
+              data ? formatBytes(totalDisk) : "--"
+            )
+          ),
+          import_react.default.createElement(
+            "div",
+            { className: "ac-card", style: { borderColor: "var(--ac-success-border)" } },
+            import_react.default.createElement(
+              "div",
+              { style: { fontSize: 11, color: "var(--ac-text-muted)" } },
+              t.recCard(recItems.length)
+            ),
+            import_react.default.createElement(
+              "div",
+              {
+                className: "ac-num",
+                style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: "var(--ac-success-text)" }
+              },
+              data ? formatBytes(recBytes) : "--"
+            )
+          ),
+          import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.reclaimCard),
+            import_react.default.createElement(
+              "div",
+              {
+                className: "ac-num",
+                style: { fontSize: 19, fontWeight: 700, marginTop: 4, color: "var(--ac-accent)" }
+              },
+              data ? formatBytes(totalReclaim) : "--"
+            )
+          ),
+          import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement("div", { style: { fontSize: 11, color: "var(--ac-text-muted)" } }, t.statusCard),
+            import_react.default.createElement(
+              "div",
+              { className: "ac-num", style: { fontSize: 19, fontWeight: 700, marginTop: 4 } },
+              data ? `${orphans.length} / ${issuesCount} / ${data.trash?.length ?? 0}` : "--"
+            )
+          )
+        ),
+        // Tabs
+        import_react.default.createElement(
+          "div",
+          { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 } },
+          ["scan", "mcp", "doctor", "trash"].map(
+            (k) => import_react.default.createElement(
+              "button",
+              {
+                key: k,
+                className: `ac-btn ${tab === k ? "ac-btn-primary" : "ac-btn-ghost"}`,
+                onClick: () => setTab(k)
+              },
+              k === "scan" ? t.tabScan(allItems.length) : k === "mcp" ? t.tabMcp(orphans.length) : k === "doctor" ? t.tabDoctor(issuesCount) : t.tabTrash(data?.trash?.length ?? 0)
+            )
+          )
+        ),
+        tab === "scan" && import_react.default.createElement(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: 10 } },
+          agents.length > 0 && import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11,
+                  color: "var(--ac-text-secondary)",
+                  marginBottom: 8
+                }
+              },
+              import_react.default.createElement("span", null, t.breakdownTitle),
+              import_react.default.createElement("span", { className: "ac-num" }, formatBytes(totalDisk))
+            ),
+            import_react.default.createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  height: 8,
+                  width: "100%",
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  background: "var(--ac-track-bg)"
+                }
+              },
+              diskBreakdownAgents.map(
+                (a, idx) => import_react.default.createElement("button", {
+                  key: a.agent,
+                  type: "button",
+                  title: `${agentLabel(a.agent)}: ${formatBytes(a.diskUsageBytes)}`,
+                  onClick: () => setAgentFilter((prev) => prev === a.agent ? "all" : a.agent),
                   style: {
-                    borderColor: recFilter === k ? "var(--ac-accent)" : void 0,
-                    color: recFilter === k ? "var(--ac-accent)" : void 0,
-                    background: recFilter === k ? "var(--ac-accent-soft)" : void 0
-                  },
-                  onClick: () => setRecFilter(k)
-                },
-                label
+                    width: `${Math.max(1.5, a.diskUsageBytes / safeTotalDisk * 100)}%`,
+                    height: "100%",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    background: AGENT_COLORS[idx % AGENT_COLORS.length],
+                    opacity: agentFilter !== "all" && agentFilter !== a.agent ? 0.3 : 1
+                  }
+                })
               )
             ),
             import_react.default.createElement(
               "div",
-              { style: { position: "relative", display: "inline-flex", alignItems: "center" } },
-              import_react.default.createElement(
-                "span",
-                {
-                  style: {
-                    position: "absolute",
-                    left: 9,
-                    color: "var(--ac-text-muted)",
-                    pointerEvents: "none",
-                    display: "inline-flex"
-                  }
-                },
-                import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.search })
-              ),
-              import_react.default.createElement("input", {
-                type: "text",
-                className: "ac-input",
-                value: searchQuery,
-                placeholder: t.searchPlaceholder,
-                onChange: (e) => setSearchQuery(e.target.value)
-              })
-            )
-          ),
-          import_react.default.createElement(
-            "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" } },
-            import_react.default.createElement(
-              "button",
               {
-                className: "ac-btn ac-btn-ghost",
-                onClick: () => setSelectedIds(
-                  new Set(
-                    allItems.filter((i) => i.recommendation === "recommended").map((i) => i.id)
+                style: {
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 10,
+                  marginTop: 8,
+                  fontSize: 11
+                }
+              },
+              diskBreakdownAgents.map(
+                (a, idx) => import_react.default.createElement(
+                  "button",
+                  {
+                    key: a.agent,
+                    type: "button",
+                    onClick: () => setAgentFilter((prev) => prev === a.agent ? "all" : a.agent),
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      border: "none",
+                      background: agentFilter === a.agent ? "var(--ac-active-bg)" : "transparent",
+                      color: "inherit",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                      cursor: "pointer",
+                      fontSize: 11
+                    }
+                  },
+                  import_react.default.createElement("span", {
+                    style: {
+                      width: 7,
+                      height: 7,
+                      borderRadius: 999,
+                      background: AGENT_COLORS[idx % AGENT_COLORS.length]
+                    }
+                  }),
+                  agentLabel(a.agent),
+                  import_react.default.createElement(
+                    "span",
+                    { className: "ac-num", style: { color: "var(--ac-text-muted)" } },
+                    formatBytes(a.diskUsageBytes)
                   )
                 )
-              },
-              t.selectRec
-            ),
-            import_react.default.createElement(
-              "button",
-              {
-                className: "ac-btn ac-btn-ghost",
-                onClick: () => setSelectedIds((prev) => {
-                  const next = new Set(prev);
-                  for (const it of visibleItems) next.add(it.id);
-                  return next;
-                })
-              },
-              t.selectVisible
-            ),
-            import_react.default.createElement(
-              "button",
-              {
-                className: "ac-btn ac-btn-ghost",
-                onClick: () => setSelectedIds(/* @__PURE__ */ new Set())
-              },
-              t.clearSel
-            )
-          )
-        ),
-        // Selected Summary & Execution Bar
-        import_react.default.createElement(
-          "div",
-          {
-            className: "ac-card",
-            style: {
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 10,
-              borderColor: selectedItems.length > 0 ? "var(--ac-accent-border)" : void 0
-            }
-          },
-          import_react.default.createElement(
-            "div",
-            { style: { fontSize: 12 } },
-            t.selectedPrefix,
-            import_react.default.createElement(
-              "strong",
-              { className: "ac-num", style: { color: "var(--ac-accent)" } },
-              `${selectedItems.length}`
-            ),
-            t.selectedMid,
-            import_react.default.createElement(
-              "strong",
-              { className: "ac-num", style: { color: "var(--ac-accent)" } },
-              formatBytes(selectedBytes)
+              )
             )
           ),
+          // Filter + Search + Selection Toolbar
           import_react.default.createElement(
             "div",
-            { style: { display: "flex", gap: 8 } },
+            {
+              className: "ac-card",
+              style: {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                justifyContent: "space-between"
+              }
+            },
             import_react.default.createElement(
-              "button",
-              {
-                className: "ac-btn ac-btn-ghost",
-                disabled: busy || selectedItems.length === 0,
-                onClick: () => void runAction(t.labelDryRun, "/agent-cleaner/api/clean", {
-                  exemptHours,
-                  lang,
-                  dryRun: true,
-                  selectedIds: selectedItems.map((i) => i.id)
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" } },
+              [
+                ["all", t.filterAll(allItems.length)],
+                ["recommended", t.filterRec(recItems.length)],
+                ["optional", t.filterOpt(optCount)],
+                ["exempt", t.filterExempt(exemptCount)]
+              ].map(
+                ([k, label]) => import_react.default.createElement(
+                  "button",
+                  {
+                    key: k,
+                    className: "ac-btn ac-btn-ghost",
+                    style: {
+                      borderColor: recFilter === k ? "var(--ac-accent)" : void 0,
+                      color: recFilter === k ? "var(--ac-accent)" : void 0,
+                      background: recFilter === k ? "var(--ac-accent-soft)" : void 0
+                    },
+                    onClick: () => setRecFilter(k)
+                  },
+                  label
+                )
+              ),
+              import_react.default.createElement(
+                "div",
+                { style: { position: "relative", display: "inline-flex", alignItems: "center" } },
+                import_react.default.createElement(
+                  "span",
+                  {
+                    style: {
+                      position: "absolute",
+                      left: 9,
+                      color: "var(--ac-text-muted)",
+                      pointerEvents: "none",
+                      display: "inline-flex"
+                    }
+                  },
+                  import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.search })
+                ),
+                import_react.default.createElement("input", {
+                  type: "text",
+                  className: "ac-input",
+                  value: searchQuery,
+                  placeholder: t.searchPlaceholder,
+                  onChange: (e) => setSearchQuery(e.target.value)
                 })
-              },
-              t.dryRun
+              )
+            ),
+            import_react.default.createElement(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" } },
+              import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-ghost",
+                  onClick: () => setSelectedIds(
+                    new Set(
+                      allItems.filter((i) => i.recommendation === "recommended").map((i) => i.id)
+                    )
+                  )
+                },
+                t.selectRec
+              ),
+              import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-ghost",
+                  onClick: () => setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    for (const it of visibleItems) next.add(it.id);
+                    return next;
+                  })
+                },
+                t.selectVisible
+              ),
+              import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-ghost",
+                  onClick: () => setSelectedIds(/* @__PURE__ */ new Set())
+                },
+                t.clearSel
+              )
+            )
+          ),
+          // Selected Summary & Execution Bar
+          import_react.default.createElement(
+            "div",
+            {
+              className: "ac-card",
+              style: {
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+                borderColor: selectedItems.length > 0 ? "var(--ac-accent-border)" : void 0
+              }
+            },
+            import_react.default.createElement(
+              "div",
+              { style: { fontSize: 12 } },
+              t.selectedPrefix,
+              import_react.default.createElement(
+                "strong",
+                { className: "ac-num", style: { color: "var(--ac-accent)" } },
+                `${selectedItems.length}`
+              ),
+              t.selectedMid,
+              import_react.default.createElement(
+                "strong",
+                { className: "ac-num", style: { color: "var(--ac-accent)" } },
+                formatBytes(selectedBytes)
+              )
             ),
             import_react.default.createElement(
               "button",
@@ -1041,188 +1287,425 @@ function CleanerPanel() {
               import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
               t.deleteSelected(formatBytes(selectedBytes))
             )
-          )
-        ),
-        // Item List
-        import_react.default.createElement(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: 6 } },
-          visibleItems.map((it) => {
-            const checked = selectedIds.has(it.id);
-            return import_react.default.createElement(
-              "label",
-              {
-                key: it.id,
-                className: "ac-card ac-row-card",
-                style: {
-                  borderColor: checked ? "var(--ac-accent)" : void 0,
-                  opacity: it.recommendation === "exempt" && !checked ? 0.72 : 1
-                }
-              },
-              import_react.default.createElement("input", {
-                type: "checkbox",
-                checked,
-                onChange: () => toggleItem(it.id),
-                style: { marginTop: 3, accentColor: "var(--ac-accent)", cursor: "pointer" }
-              }),
-              import_react.default.createElement(
-                "div",
-                { style: { flex: 1, minWidth: 0 } },
+          ),
+          // Item List
+          import_react.default.createElement(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: 6 } },
+            visibleItems.map((it) => {
+              const checked = selectedIds.has(it.id);
+              return import_react.default.createElement(
+                "label",
+                {
+                  key: it.id,
+                  className: "ac-card ac-row-card",
+                  style: {
+                    borderColor: checked ? "var(--ac-accent)" : void 0,
+                    opacity: it.recommendation === "exempt" && !checked ? 0.72 : 1
+                  }
+                },
+                import_react.default.createElement("input", {
+                  type: "checkbox",
+                  checked,
+                  onChange: () => toggleItem(it.id),
+                  style: { marginTop: 3, accentColor: "var(--ac-accent)", cursor: "pointer" }
+                }),
                 import_react.default.createElement(
                   "div",
-                  {
-                    style: {
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 12,
-                      fontWeight: 600
-                    }
-                  },
-                  recBadge(it.recommendation, t),
+                  { style: { flex: 1, minWidth: 0 } },
                   import_react.default.createElement(
-                    "span",
+                    "div",
                     {
-                      className: "ac-pill",
-                      style: { background: "var(--ac-info-bg)", color: "var(--ac-info-text)" }
+                      style: {
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 12,
+                        fontWeight: 600
+                      }
                     },
-                    it.agent
+                    recBadge(it.recommendation, t),
+                    import_react.default.createElement(
+                      "span",
+                      {
+                        className: "ac-pill",
+                        style: { background: "var(--ac-info-bg)", color: "var(--ac-info-text)" }
+                      },
+                      agentLabel(it.agent)
+                    ),
+                    import_react.default.createElement("span", null, it.description)
                   ),
-                  import_react.default.createElement("span", null, it.description)
-                ),
-                import_react.default.createElement(
-                  "div",
-                  { style: { fontSize: 11, color: "var(--ac-text-secondary)", marginTop: 4 } },
-                  it.recommendationReason
+                  import_react.default.createElement(
+                    "div",
+                    { style: { fontSize: 11, color: "var(--ac-text-secondary)", marginTop: 4 } },
+                    it.recommendationReason
+                  ),
+                  import_react.default.createElement(
+                    "div",
+                    {
+                      className: "ac-num",
+                      style: {
+                        fontSize: 11,
+                        color: "var(--ac-text-muted)",
+                        marginTop: 3,
+                        wordBreak: "break-all"
+                      }
+                    },
+                    it.path
+                  )
                 ),
                 import_react.default.createElement(
                   "div",
                   {
                     className: "ac-num",
-                    style: {
-                      fontSize: 11,
-                      color: "var(--ac-text-muted)",
-                      marginTop: 3,
-                      wordBreak: "break-all"
-                    }
+                    style: { fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }
                   },
-                  it.path
+                  formatBytes(it.sizeBytes)
                 )
-              ),
-              import_react.default.createElement(
-                "div",
-                {
-                  className: "ac-num",
-                  style: { fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }
-                },
-                formatBytes(it.sizeBytes)
-              )
-            );
-          }),
-          !loading && visibleItems.length === 0 && import_react.default.createElement(
-            "div",
-            { className: "ac-card", style: { textAlign: "center", fontSize: 12, color: "var(--ac-text-muted)" } },
-            t.noItems
-          )
-        )
-      ),
-      tab === "mcp" && import_react.default.createElement(
-        "div",
-        { className: "ac-card" },
-        import_react.default.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 10
-            }
-          },
-          import_react.default.createElement("strong", { style: { fontSize: 13 } }, t.mcpTitle),
-          orphans.length > 0 && import_react.default.createElement(
-            "button",
-            {
-              className: "ac-btn ac-btn-primary",
-              disabled: busy,
-              onClick: () => void runAction(t.labelMcpKill, "/agent-cleaner/api/mcp-kill")
-            },
-            t.killAll
+              );
+            }),
+            !loading && visibleItems.length === 0 && import_react.default.createElement(
+              "div",
+              { className: "ac-card", style: { textAlign: "center", fontSize: 12, color: "var(--ac-text-muted)" } },
+              t.noItems
+            )
           )
         ),
-        orphans.length === 0 ? import_react.default.createElement("div", { style: { fontSize: 12, color: "var(--ac-text-muted)" } }, t.noOrphans) : orphans.map(
-          (p) => import_react.default.createElement(
-            "div",
-            { key: p.pid, className: "ac-num", style: { fontSize: 12, marginTop: 6 } },
-            `PID ${p.pid}: ${p.command}`
-          )
-        )
-      ),
-      tab === "doctor" && import_react.default.createElement(
-        "div",
-        { style: { display: "flex", flexDirection: "column", gap: 8 } },
-        issuesCount > 0 && import_react.default.createElement(
+        tab === "mcp" && import_react.default.createElement(
           "div",
-          null,
+          { style: { display: "flex", flexDirection: "column", gap: 10 } },
+          // Orphan Processes
           import_react.default.createElement(
-            "button",
-            {
-              className: "ac-btn ac-btn-primary",
-              disabled: busy,
-              onClick: () => void runAction(t.labelDoctorFix, "/agent-cleaner/api/doctor-fix")
-            },
-            import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.wrench }),
-            t.doctorFix
-          )
-        ),
-        (data?.doctors ?? []).map(
-          (doc) => import_react.default.createElement(
             "div",
-            { key: doc.path, className: "ac-card" },
+            { className: "ac-card" },
             import_react.default.createElement(
               "div",
               {
                 style: {
                   display: "flex",
                   justifyContent: "space-between",
-                  fontSize: 13,
-                  fontWeight: 600
+                  alignItems: "center",
+                  marginBottom: 10
                 }
               },
-              import_react.default.createElement("span", null, doc.agent),
-              import_react.default.createElement(
-                "span",
-                { style: { color: doc.healthy ? "var(--ac-success-text)" : "var(--ac-warn-text)" } },
-                doc.healthy ? t.healthy : t.issueCount(doc.issues.length)
+              import_react.default.createElement("strong", { style: { fontSize: 13 } }, t.mcpTitle),
+              orphans.length > 0 && import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-primary",
+                  disabled: busy,
+                  onClick: () => void runAction(t.labelMcpKill, "/agent-cleaner/api/mcp-kill")
+                },
+                t.killAll
               )
+            ),
+            orphans.length === 0 ? import_react.default.createElement("div", { style: { fontSize: 12, color: "var(--ac-text-muted)" } }, t.noOrphans) : import_react.default.createElement(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: 8 } },
+              orphans.map((p) => {
+                const memMb = Math.max(1, Math.round((p.rssKb || 0) / 1024));
+                return import_react.default.createElement(
+                  "div",
+                  {
+                    key: p.pid,
+                    style: {
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--ac-warn-border)",
+                      background: "var(--ac-warn-bg)"
+                    }
+                  },
+                  import_react.default.createElement(
+                    "div",
+                    { style: { flex: 1, minWidth: 0 } },
+                    import_react.default.createElement(
+                      "div",
+                      {
+                        className: "ac-num",
+                        style: {
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "var(--ac-warn-text)"
+                        }
+                      },
+                      `PID ${p.pid}`,
+                      p.matchedAgent && import_react.default.createElement(
+                        "span",
+                        {
+                          className: "ac-pill",
+                          style: { background: "var(--ac-info-bg)", color: "var(--ac-info-text)" }
+                        },
+                        agentLabel(p.matchedAgent)
+                      ),
+                      import_react.default.createElement(
+                        "span",
+                        null,
+                        `${p.matchedName ?? "MCP Stdio Process"} \xB7 ${memMb} MB`
+                      )
+                    ),
+                    import_react.default.createElement(
+                      "div",
+                      {
+                        className: "ac-num",
+                        style: {
+                          fontSize: 11,
+                          color: "var(--ac-text-secondary)",
+                          marginTop: 3,
+                          wordBreak: "break-all"
+                        }
+                      },
+                      p.command
+                    )
+                  ),
+                  import_react.default.createElement(
+                    "button",
+                    {
+                      className: "ac-btn ac-btn-ghost",
+                      disabled: busy,
+                      style: { flexShrink: 0 },
+                      onClick: () => void runAction(t.labelMcpKill, "/agent-cleaner/api/mcp-kill", {
+                        pid: p.pid
+                      })
+                    },
+                    t.killOne
+                  )
+                );
+              })
+            )
+          ),
+          // Dead Links
+          import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement(
+              "div",
+              { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              t.deadLinksTitle(deadLinks.length)
+            ),
+            deadLinks.length === 0 ? import_react.default.createElement("div", { style: { fontSize: 12, color: "var(--ac-text-muted)" } }, t.noDeadLinks) : import_react.default.createElement(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: 6 } },
+              deadLinks.map(
+                (d, idx) => import_react.default.createElement(
+                  "div",
+                  {
+                    key: `${d.agent}:${d.name}:${idx}`,
+                    style: {
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--ac-danger-border)",
+                      background: "var(--ac-danger-bg)",
+                      fontSize: 12
+                    }
+                  },
+                  import_react.default.createElement(
+                    "div",
+                    { style: { fontWeight: 600, color: "var(--ac-danger-text)" } },
+                    `[${agentLabel(d.agent)}] ${d.name}`
+                  ),
+                  import_react.default.createElement(
+                    "div",
+                    {
+                      className: "ac-num",
+                      style: { fontSize: 11, color: "var(--ac-text-muted)", marginTop: 2, wordBreak: "break-all" }
+                    },
+                    d.command || d.url || d.configPath || ""
+                  )
+                )
+              )
+            )
+          ),
+          // Cross-Agent Duplicates
+          duplicates.length > 0 && import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement(
+              "div",
+              { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              t.duplicatesTitle(duplicates.length)
             ),
             import_react.default.createElement(
               "div",
-              { className: "ac-num", style: { fontSize: 11, color: "var(--ac-text-muted)", marginTop: 2 } },
-              doc.path
+              { style: { display: "flex", flexDirection: "column", gap: 6 } },
+              duplicates.map((group, idx) => {
+                const first = group[0];
+                const agentsList = [...new Set(group.map((g) => agentLabel(g.agent)))].join(", ");
+                return import_react.default.createElement(
+                  "div",
+                  {
+                    key: idx,
+                    style: {
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--ac-border)",
+                      fontSize: 12
+                    }
+                  },
+                  import_react.default.createElement(
+                    "div",
+                    { style: { fontWeight: 600 } },
+                    `${first?.name ?? "MCP"} \xB7 ${agentsList}`
+                  ),
+                  import_react.default.createElement(
+                    "div",
+                    {
+                      className: "ac-num",
+                      style: { fontSize: 11, color: "var(--ac-text-muted)", marginTop: 2, wordBreak: "break-all" }
+                    },
+                    first?.command || first?.url || ""
+                  )
+                );
+              })
+            )
+          ),
+          // Cold Caches
+          import_react.default.createElement(
+            "div",
+            { className: "ac-card" },
+            import_react.default.createElement(
+              "div",
+              { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } },
+              t.coldCachesTitle(coldCaches.length)
             ),
-            doc.issues.map(
-              (iss) => import_react.default.createElement(
-                "div",
-                { key: iss.id, style: { fontSize: 12, marginTop: 6, color: "var(--ac-warn-text)" } },
-                iss.message
+            coldCaches.length === 0 ? import_react.default.createElement("div", { style: { fontSize: 12, color: "var(--ac-text-muted)" } }, t.noColdCaches) : import_react.default.createElement(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: 6, maxHeight: 240, overflowY: "auto" } },
+              coldCaches.map(
+                (c) => import_react.default.createElement(
+                  "div",
+                  {
+                    key: c.path,
+                    style: {
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--ac-border)",
+                      fontSize: 11
+                    }
+                  },
+                  import_react.default.createElement(
+                    "span",
+                    { className: "ac-num", style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                    `[${c.source}] ${c.path.split("/").pop()} (${c.lastAccessDays}d)`
+                  ),
+                  import_react.default.createElement(
+                    "span",
+                    { className: "ac-num", style: { color: "var(--ac-text-secondary)", flexShrink: 0 } },
+                    formatBytes(c.sizeBytes)
+                  )
+                )
               )
             )
           )
-        )
-      ),
-      tab === "trash" && import_react.default.createElement(
-        "div",
-        { style: { display: "flex", flexDirection: "column", gap: 8 } },
-        (data?.trash ?? []).map(
-          (b) => import_react.default.createElement(
+        ),
+        tab === "doctor" && import_react.default.createElement(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: 8 } },
+          issuesCount > 0 && import_react.default.createElement(
+            "div",
+            null,
+            import_react.default.createElement(
+              "button",
+              {
+                className: "ac-btn ac-btn-primary",
+                disabled: busy,
+                onClick: () => void runAction(t.labelDoctorFix, "/agent-cleaner/api/doctor-fix")
+              },
+              import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.wrench }),
+              t.doctorFix
+            )
+          ),
+          (data?.doctors ?? []).map(
+            (doc) => import_react.default.createElement(
+              "div",
+              { key: doc.path, className: "ac-card" },
+              import_react.default.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    fontWeight: 600
+                  }
+                },
+                import_react.default.createElement("span", null, agentLabel(doc.agent)),
+                import_react.default.createElement(
+                  "span",
+                  { style: { color: doc.healthy ? "var(--ac-success-text)" : "var(--ac-warn-text)" } },
+                  doc.healthy ? t.healthy : t.issueCount(doc.issues.length)
+                )
+              ),
+              import_react.default.createElement(
+                "div",
+                { className: "ac-num", style: { fontSize: 11, color: "var(--ac-text-muted)", marginTop: 2 } },
+                doc.path
+              ),
+              doc.issues.map((iss) => {
+                const sev = iss.severity ?? "warning";
+                const sevStyle = sev === "error" ? { background: "var(--ac-danger-bg)", color: "var(--ac-danger-text)", border: "1px solid var(--ac-danger-border)" } : sev === "info" ? { background: "var(--ac-info-bg)", color: "var(--ac-info-text)", border: "1px solid var(--ac-border)" } : { background: "var(--ac-warn-bg)", color: "var(--ac-warn-text)", border: "1px solid var(--ac-warn-border)" };
+                return import_react.default.createElement(
+                  "div",
+                  {
+                    key: iss.id,
+                    style: {
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      marginTop: 6
+                    }
+                  },
+                  import_react.default.createElement(
+                    "span",
+                    { className: "ac-pill", style: sevStyle },
+                    sev.toUpperCase()
+                  ),
+                  iss.autoFixable && import_react.default.createElement(
+                    "span",
+                    {
+                      className: "ac-pill",
+                      style: {
+                        background: "var(--ac-success-bg)",
+                        color: "var(--ac-success-text)",
+                        border: "1px solid var(--ac-success-border)"
+                      }
+                    },
+                    t.autoFixable
+                  ),
+                  import_react.default.createElement(
+                    "span",
+                    { style: { color: sev === "error" ? "var(--ac-danger-text)" : "var(--ac-warn-text)" } },
+                    iss.message
+                  )
+                );
+              })
+            )
+          )
+        ),
+        tab === "trash" && import_react.default.createElement(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: 8 } },
+          trashBatches.length > 0 && import_react.default.createElement(
             "div",
             {
-              key: b.batchId,
               className: "ac-card",
               style: {
                 display: "flex",
+                flexWrap: "wrap",
                 justifyContent: "space-between",
                 alignItems: "center",
                 gap: 10
@@ -1230,47 +1713,133 @@ function CleanerPanel() {
             },
             import_react.default.createElement(
               "div",
-              { className: "ac-num", style: { fontSize: 12 } },
-              import_react.default.createElement(
-                "strong",
-                { style: { color: "var(--ac-accent)" } },
-                b.batchId.slice(0, 8)
-              ),
-              ` \xB7 ${b.items.length} \xB7 ${formatBytes(b.totalBytes)}`
+              { className: "ac-num", style: { fontSize: 12, color: "var(--ac-text-secondary)" } },
+              t.trashSummary(trashBatches.length, formatBytes(trashTotalBytes))
             ),
             import_react.default.createElement(
-              "div",
-              { style: { display: "flex", gap: 6 } },
-              import_react.default.createElement(
-                "button",
-                {
-                  className: "ac-btn ac-btn-ghost",
-                  disabled: busy,
-                  onClick: () => void runAction(t.labelRestore, "/agent-cleaner/api/restore", {
-                    batchId: b.batchId
-                  })
+              "button",
+              {
+                className: "ac-btn ac-btn-ghost",
+                disabled: busy,
+                style: {
+                  borderColor: "var(--ac-danger-border)",
+                  color: "var(--ac-danger-text)"
                 },
-                import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.restore }),
-                t.restore
-              ),
-              import_react.default.createElement(
-                "button",
-                {
-                  className: "ac-btn ac-btn-ghost",
-                  disabled: busy,
-                  onClick: () => void runAction(t.labelPurge, "/agent-cleaner/api/purge", {
-                    batchId: b.batchId
-                  })
-                },
-                t.purge
-              )
+                onClick: () => void runAction(t.labelPurge, "/agent-cleaner/api/purge", { all: true })
+              },
+              import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+              t.purgeAll
             )
+          ),
+          trashBatches.map((b) => {
+            const expanded = expandedBatchIds.has(b.batchId);
+            return import_react.default.createElement(
+              "div",
+              { key: b.batchId, className: "ac-card" },
+              import_react.default.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    flexWrap: "wrap",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10
+                  }
+                },
+                import_react.default.createElement(
+                  "div",
+                  { className: "ac-num", style: { fontSize: 12 } },
+                  import_react.default.createElement(
+                    "strong",
+                    { style: { color: "var(--ac-accent)" } },
+                    b.batchId.slice(0, 8)
+                  ),
+                  ` \xB7 ${formatTimeAgo(b.timestamp, lang)} \xB7 ${t.itemsUnit(b.items.length)} \xB7 ${formatBytes(b.totalBytes)}`
+                ),
+                import_react.default.createElement(
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                  import_react.default.createElement(
+                    "button",
+                    {
+                      className: "ac-btn ac-btn-ghost",
+                      onClick: () => toggleBatchDetails(b.batchId)
+                    },
+                    expanded ? t.hideDetails : t.details
+                  ),
+                  import_react.default.createElement(
+                    "button",
+                    {
+                      className: "ac-btn ac-btn-ghost",
+                      disabled: busy,
+                      onClick: () => void runAction(t.labelRestore, "/agent-cleaner/api/restore", {
+                        batchId: b.batchId
+                      })
+                    },
+                    import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.restore }),
+                    t.restore
+                  ),
+                  import_react.default.createElement(
+                    "button",
+                    {
+                      className: "ac-btn ac-btn-ghost",
+                      disabled: busy,
+                      onClick: () => void runAction(t.labelPurge, "/agent-cleaner/api/purge", {
+                        batchId: b.batchId
+                      })
+                    },
+                    t.purge
+                  )
+                )
+              ),
+              expanded && import_react.default.createElement(
+                "div",
+                {
+                  style: {
+                    marginTop: 10,
+                    paddingTop: 8,
+                    borderTop: "1px solid var(--ac-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4
+                  }
+                },
+                b.items.map(
+                  (item) => import_react.default.createElement(
+                    "div",
+                    {
+                      key: item.id,
+                      className: "ac-num",
+                      style: {
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 10,
+                        fontSize: 11,
+                        color: "var(--ac-text-secondary)"
+                      }
+                    },
+                    import_react.default.createElement(
+                      "span",
+                      { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                      `[${agentLabel(item.agent)}] ${item.originalPath}`
+                    ),
+                    import_react.default.createElement(
+                      "span",
+                      { style: { flexShrink: 0, color: "var(--ac-text-muted)" } },
+                      formatBytes(item.sizeBytes)
+                    )
+                  )
+                )
+              )
+            );
+          }),
+          trashBatches.length === 0 && import_react.default.createElement(
+            "div",
+            { className: "ac-card", style: { fontSize: 12, color: "var(--ac-text-muted)" } },
+            t.trashEmpty
           )
-        ),
-        (!data?.trash || data.trash.length === 0) && import_react.default.createElement(
-          "div",
-          { className: "ac-card", style: { fontSize: 12, color: "var(--ac-text-muted)" } },
-          t.trashEmpty
         )
       )
     )

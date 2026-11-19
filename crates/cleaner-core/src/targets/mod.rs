@@ -55,6 +55,49 @@ pub(crate) fn push_dir_item(
     ));
 }
 
+pub(crate) const DESKTOP_CACHE_SUBDIRS: &[(&str, ScanCategory, &str, &str)] = &[
+    ("Cache", ScanCategory::Cache, "桌面端 HTTP 缓存", "desktop HTTP cache"),
+    ("Code Cache", ScanCategory::Cache, "桌面端 JS 字节码缓存", "desktop JS code cache"),
+    ("GPUCache", ScanCategory::Cache, "桌面端 GPU 缓存", "desktop GPU cache"),
+    ("CachedData", ScanCategory::Cache, "桌面端扩展编译缓存", "desktop CachedData"),
+    ("GraphiteDawnCache", ScanCategory::Cache, "桌面端 GraphiteDawn 图形缓存", "desktop GraphiteDawn cache"),
+    ("DawnWebGPUCache", ScanCategory::Cache, "桌面端 DawnWebGPU 图形缓存", "desktop DawnWebGPU cache"),
+    ("DawnGraphiteCache", ScanCategory::Cache, "桌面端 DawnGraphite 图形缓存", "desktop DawnGraphite cache"),
+    ("Crashpad", ScanCategory::Log, "桌面端崩溃转储日志", "desktop crashpad logs"),
+    ("logs", ScanCategory::Log, "桌面端运行日志", "desktop runtime logs"),
+];
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn push_desktop_cache_dirs(
+    items: &mut Vec<ScanItem>,
+    agent: &str,
+    support_dir: &Path,
+    zh_app: &str,
+    en_app: &str,
+    exempt_hours: u64,
+    now_ms: u64,
+    lang: Language,
+) {
+    for (sub, cat, zh_kind, en_kind) in DESKTOP_CACHE_SUBDIRS {
+        let desc = match lang {
+            Language::Zh => format!("{zh_app} {zh_kind}"),
+            Language::En => format!("{en_app} {en_kind}"),
+        };
+        push_dir_item(
+            items,
+            agent,
+            &support_dir.join(sub),
+            cat.clone(),
+            &desc,
+            ItemStatus::Active,
+            true,
+            exempt_hours,
+            now_ms,
+            lang,
+        );
+    }
+}
+
 pub fn all_targets() -> Vec<Box<dyn AgentTarget>> {
     vec![
         Box::new(claude::ClaudeTarget),

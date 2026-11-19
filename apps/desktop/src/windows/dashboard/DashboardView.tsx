@@ -149,7 +149,7 @@ export function DashboardView() {
     });
   };
 
-  const handleClean = async (dryRun: boolean) => {
+  const handleClean = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     setBusy(true);
@@ -157,31 +157,21 @@ export function DashboardView() {
     try {
       const res = await commands.clean({
         exemptHours,
-        dryRun,
+        dryRun: false,
         agentFilter: null,
         selectedIds: ids,
         onlyRecommended: false,
         lang,
       });
       if (res.status === 'ok') {
-        if (dryRun) {
-          setBanner({
-            kind: 'info',
-            text:
-              lang === 'zh'
-                ? `预演模式：将安全移入回收站 ${res.data.cleanedCount} 项，释放 ${formatBytes(res.data.freedBytes)}`
-                : `Dry-Run: would move ${res.data.cleanedCount} item(s) to trash, freeing ${formatBytes(res.data.freedBytes)}`,
-          });
-        } else {
-          setBanner({
-            kind: 'success',
-            text:
-              lang === 'zh'
-                ? `已移入回收站 ${res.data.cleanedCount} 项（释放 ${formatBytes(res.data.freedBytes)}），回滚批次：${res.data.batchId ?? 'N/A'}`
-                : `Moved ${res.data.cleanedCount} item(s) to trash (${formatBytes(res.data.freedBytes)}), batchId: ${res.data.batchId ?? 'N/A'}`,
-          });
-          await refreshAll();
-        }
+        setBanner({
+          kind: 'success',
+          text:
+            lang === 'zh'
+              ? `已移入回收站 ${res.data.cleanedCount} 项（释放 ${formatBytes(res.data.freedBytes)}），回滚批次：${res.data.batchId ?? 'N/A'}`
+              : `Moved ${res.data.cleanedCount} item(s) to trash (${formatBytes(res.data.freedBytes)}), batchId: ${res.data.batchId ?? 'N/A'}`,
+        });
+        await refreshAll();
       } else {
         setBanner({ kind: 'error', text: res.error });
       }
@@ -295,6 +285,18 @@ export function DashboardView() {
 
   const summary = overview?.summary;
   const totalDisk = Math.max(1, summary?.totalDiskUsageBytes ?? 1);
+  const diskBreakdownAgents = useMemo(
+    () =>
+      (overview?.agents ?? [])
+        .filter((a) => (a.diskUsageBytes ?? 0) > 0)
+        .sort(
+          (a, b) =>
+            (b.diskUsageBytes ?? 0) - (a.diskUsageBytes ?? 0) ||
+            (b.totalBytes ?? 0) - (a.totalBytes ?? 0) ||
+            a.agent.localeCompare(b.agent),
+        ),
+    [overview],
+  );
   const recCount = rawItems.filter((i) => i.recommendation === 'recommended').length;
   const optCount = rawItems.filter((i) => i.recommendation === 'optional').length;
   const exemptCount = rawItems.filter((i) => i.recommendation === 'exempt').length;
@@ -330,12 +332,13 @@ export function DashboardView() {
             <span className="text-slate-400">{t.guardLabel}</span>
             <select
               value={exemptHours}
+              disabled={loading || busy}
               onChange={(e) => {
                 const h = Number(e.target.value);
                 setExemptHours(h);
                 void refreshAll(h, lang, false);
               }}
-              className="cursor-pointer bg-transparent font-medium text-cyan-400 focus:outline-none"
+              className="cursor-pointer bg-transparent font-medium text-cyan-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value={0}>{t.guardOff}</option>
               <option value={12}>{t.h12}</option>
@@ -355,6 +358,35 @@ export function DashboardView() {
           </button>
         </div>
       </header>
+
+      {/* Workspace Body (relative host for centered scanning overlay) */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {loading && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute inset-0 z-20 flex items-center justify-center bg-[#060a13]/75 px-6 backdrop-blur-[3px]"
+          >
+            <div className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-cyan-500/25 bg-[#0b1120]/95 px-8 py-7 text-center shadow-2xl shadow-cyan-950/30">
+              <div className="relative flex h-20 w-20 items-center justify-center">
+                <div className="absolute inset-0 animate-spin rounded-full border-[3px] border-cyan-500/15 border-t-cyan-400" />
+                <div
+                  className="absolute inset-2.5 animate-spin rounded-full border-2 border-blue-500/15 border-b-blue-400"
+                  style={{ animationDirection: 'reverse', animationDuration: '1.25s' }}
+                />
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/30">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+              </div>
+              <p className="mt-4 text-sm font-semibold tracking-tight text-slate-100">
+                {overview ? t.rescanningTitle : t.scanningTitle}
+              </p>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                {t.scanningSubtitle}
+              </p>
+            </div>
+          </div>
+        )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 px-6 pt-5 lg:grid-cols-4">
@@ -481,55 +513,50 @@ export function DashboardView() {
                   </span>
                 </div>
                 <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800/80">
-                  {overview.agents
-                    .filter((a) => (a.diskUsageBytes ?? 0) > 0)
-                    .map((a, idx) => {
-                      const pct = Math.max(
-                        1.5,
-                        ((a.diskUsageBytes ?? 0) / totalDisk) * 100,
-                      );
-                      return (
-                        <button
-                          key={a.agent}
-                          type="button"
-                          onClick={() =>
-                            setSelectedAgent((prev) => (prev === a.agent ? 'all' : a.agent))
-                          }
-                          title={`${agentLabel(a.agent)}: ${formatBytes(a.diskUsageBytes)}`}
-                          className={`${AGENT_COLORS[idx % AGENT_COLORS.length]} h-full cursor-pointer transition-opacity duration-200 hover:opacity-85 ${
-                            selectedAgent !== 'all' && selectedAgent !== a.agent ? 'opacity-30' : ''
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      );
-                    })}
-                </div>
-                <div className="mt-2.5 flex flex-wrap gap-3 text-[11px] text-slate-400">
-                  {overview.agents
-                    .filter((a) => (a.diskUsageBytes ?? 0) > 0)
-                    .slice(0, 7)
-                    .map((a, idx) => (
+                  {diskBreakdownAgents.map((a, idx) => {
+                    const pct = Math.max(
+                      1.5,
+                      ((a.diskUsageBytes ?? 0) / totalDisk) * 100,
+                    );
+                    return (
                       <button
                         key={a.agent}
                         type="button"
                         onClick={() =>
                           setSelectedAgent((prev) => (prev === a.agent ? 'all' : a.agent))
                         }
-                        className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors ${
-                          selectedAgent === a.agent
-                            ? 'bg-slate-800 text-slate-100'
-                            : 'hover:text-slate-200'
+                        title={`${agentLabel(a.agent)}: ${formatBytes(a.diskUsageBytes)}`}
+                        className={`${AGENT_COLORS[idx % AGENT_COLORS.length]} h-full cursor-pointer transition-opacity duration-200 hover:opacity-85 ${
+                          selectedAgent !== 'all' && selectedAgent !== a.agent ? 'opacity-30' : ''
                         }`}
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full ${AGENT_COLORS[idx % AGENT_COLORS.length]}`}
-                        />
-                        <span>{agentLabel(a.agent)}</span>
-                        <span className="font-mono text-slate-500 tabular-nums">
-                          {formatBytes(a.diskUsageBytes)}
-                        </span>
-                      </button>
-                    ))}
+                        style={{ width: `${pct}%` }}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                  {diskBreakdownAgents.slice(0, 7).map((a, idx) => (
+                    <button
+                      key={a.agent}
+                      type="button"
+                      onClick={() =>
+                        setSelectedAgent((prev) => (prev === a.agent ? 'all' : a.agent))
+                      }
+                      className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors ${
+                        selectedAgent === a.agent
+                          ? 'bg-slate-800 text-slate-100'
+                          : 'hover:text-slate-200'
+                      }`}
+                    >
+                      <span
+                        className={`h-2 w-2 rounded-full ${AGENT_COLORS[idx % AGENT_COLORS.length]}`}
+                      />
+                      <span>{agentLabel(a.agent)}</span>
+                      <span className="font-mono text-slate-500 tabular-nums">
+                        {formatBytes(a.diskUsageBytes)}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -606,14 +633,7 @@ export function DashboardView() {
                   {t.clearSel}
                 </button>
                 <button
-                  onClick={() => void handleClean(true)}
-                  disabled={busy || selectedIds.size === 0}
-                  className="cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {t.dryRun}
-                </button>
-                <button
-                  onClick={() => void handleClean(false)}
+                  onClick={() => void handleClean()}
                   disabled={busy || selectedIds.size === 0}
                   className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-cyan-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-cyan-400 focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -626,6 +646,7 @@ export function DashboardView() {
             </div>
 
             {/* Items Table */}
+            {(overview || !loading) && (
             <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-[#0b1120]/80">
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-slate-800 bg-slate-900/90 text-slate-400">
@@ -704,6 +725,7 @@ export function DashboardView() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         )}
 
@@ -914,6 +936,7 @@ export function DashboardView() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }

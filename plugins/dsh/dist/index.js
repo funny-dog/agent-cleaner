@@ -3,14 +3,29 @@
  * Exposes headless Cordis Tools and HTTP bridge routes backed by the `agent-cleaner` binary.
  */
 import { execFile } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 const execFileAsync = promisify(execFile);
+const REPO_DOWNLOAD_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/download';
 const REPO_RELEASE_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/latest/download';
 const DOWNLOAD_TIMEOUT_MS = 120_000;
+function readPluginVersion() {
+    try {
+        const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.version === 'string' && parsed.version.trim()) {
+            return parsed.version.trim();
+        }
+    }
+    catch {
+        // ignore and fallback
+    }
+    return '0.2.2';
+}
+export const PLUGIN_VERSION = readPluginVersion();
 export const name = 'agent-cleaner';
 export const inject = ['tools'];
 const inFlightDownloads = new Map();
@@ -52,13 +67,30 @@ function findInPath(binName) {
 function managedBinaryPath(platform = process.platform) {
     return path.join(os.homedir(), '.agent-cleaner', 'bin', binaryFilename(platform));
 }
+function managedBinaryVersionPath(platform = process.platform) {
+    return `${managedBinaryPath(platform)}.version`;
+}
+function readManagedBinaryVersion(platform = process.platform) {
+    try {
+        return readFileSync(managedBinaryVersionPath(platform), 'utf8').trim() || null;
+    }
+    catch {
+        return null;
+    }
+}
 export function findExistingBinaryPath(configured) {
     if (configured)
         return configured;
     const binName = binaryFilename();
     const home = os.homedir();
+    const managed = managedBinaryPath();
+    if (isExistingFile(managed)) {
+        if (readManagedBinaryVersion() === PLUGIN_VERSION) {
+            return managed;
+        }
+        return null;
+    }
     const candidates = [
-        managedBinaryPath(),
         path.join(home, '.local', 'bin', binName),
         path.join(home, '.cargo', 'bin', binName),
     ];
@@ -103,9 +135,12 @@ function buildDownloadCandidates(config) {
         return { assetName: inferredAsset, urls: [explicitUrl] };
     }
     const assetName = resolveReleaseAssetName();
-    const canonicalUrl = `${REPO_RELEASE_BASE}/${assetName}`;
+    const versionedUrl = `${REPO_DOWNLOAD_BASE}/v${PLUGIN_VERSION}/${assetName}`;
+    const latestUrl = `${REPO_RELEASE_BASE}/${assetName}`;
     const proxy = process.env.DSHM_GITHUB_PROXY?.trim().replace(/\/+$/, '');
-    const urls = proxy ? [`${proxy}/${canonicalUrl}`, canonicalUrl] : [canonicalUrl];
+    const urls = proxy
+        ? [`${proxy}/${versionedUrl}`, versionedUrl, `${proxy}/${latestUrl}`, latestUrl]
+        : [versionedUrl, latestUrl];
     return { assetName, urls };
 }
 async function downloadAndInstallBinary(destPath, config) {
@@ -167,6 +202,9 @@ async function downloadAndInstallBinary(destPath, config) {
             }
         }
         renameSync(tmpPath, destPath);
+        if (destPath === managedBinaryPath()) {
+            writeFileSync(managedBinaryVersionPath(), `${PLUGIN_VERSION}\n`, 'utf8');
+        }
         return destPath;
     }
     catch (err) {
@@ -334,7 +372,12 @@ function registerHttpRoutes(ctx, config, defaultHours) {
                     return runCliJson(config, args);
                 }),
                 route('/agent-cleaner/api/doctor-fix', 'POST', () => runCliJson(config, ['doctor', '--fix'])),
-                route('/agent-cleaner/api/mcp-kill', 'POST', () => runCliJson(config, ['mcp', '--kill'])),
+                route('/agent-cleaner/api/mcp-kill', 'POST', (body) => {
+                    if (typeof body.pid === 'number' && Number.isInteger(body.pid) && body.pid > 0) {
+                        return runCliJson(config, ['mcp', '--kill', '--pid', String(body.pid)]);
+                    }
+                    return runCliJson(config, ['mcp', '--kill']);
+                }),
                 route('/agent-cleaner/api/restore', 'POST', (body) => {
                     if (typeof body.batchId !== 'string' || !body.batchId) {
                         throw new Error('batchId is required');
@@ -463,6 +506,10 @@ export function apply(ctx, config) {
                     type: 'boolean',
                     description: 'Terminate detected PPID=1 orphan stdio MCP processes',
                 },
+                pid: {
+                    type: 'number',
+                    description: 'Optional specific orphan process PID to terminate',
+                },
             },
         },
         output: buildTextOutputSpec(),
@@ -470,7 +517,41 @@ export function apply(ctx, config) {
             const cliArgs = ['mcp'];
             if (args.kill)
                 cliArgs.push('--kill');
+            if (typeof args.pid === 'number' && Number.isInteger(args.pid) && args.pid > 0) {
+                cliArgs.push('--pid', String(args.pid));
+            }
             return runCliJson(config, cliArgs);
+        },
+    });
+    tools.register({
+        name: 'agent_cleaner_restore',
+        description: 'List reversible trash batches (~/.agent-cleaner/trash/), restore a specific batch back to original paths, or permanently purge trash.',
+        parameters: {
+            type: 'object',
+            properties: {
+                batchId: {
+                    type: 'string',
+                    description: 'Trash batch UUID to restore; omit to list available trash batches',
+                },
+                purgeBatchId: {
+                    type: 'string',
+                    description: 'Optional trash batch UUID to permanently delete',
+                },
+                purgeAll: {
+                    type: 'boolean',
+                    description: 'Set true to permanently purge ALL trash batches',
+                },
+            },
+        },
+        output: buildTextOutputSpec(),
+        execute: (args = {}) => {
+            if (args.purgeAll)
+                return runCliJson(config, ['restore', '--purge-all']);
+            if (args.purgeBatchId)
+                return runCliJson(config, ['restore', '--purge', args.purgeBatchId]);
+            if (args.batchId)
+                return runCliJson(config, ['restore', args.batchId]);
+            return runCliJson(config, ['restore']);
         },
     });
 }

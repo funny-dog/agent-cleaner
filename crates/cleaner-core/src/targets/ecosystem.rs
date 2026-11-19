@@ -1,4 +1,4 @@
-use super::{push_dir_item, AgentTarget};
+use super::{push_dir_item, AgentTarget, DESKTOP_CACHE_SUBDIRS};
 use crate::fs_safe::get_dir_size;
 use crate::types::{CleanerContext, ItemStatus, Language, ScanCategory, ScanItem, ScanResult};
 use std::path::{Path, PathBuf};
@@ -12,17 +12,10 @@ fn push_desktop_caches(
     zh_app: &str,
     en_app: &str,
 ) {
-    for (sub, cat, zh_kind, en_kind) in [
-        ("Cache", ScanCategory::Cache, "桌面端 HTTP 缓存", "desktop HTTP cache"),
-        ("Code Cache", ScanCategory::Cache, "桌面端 JS 字节码缓存", "desktop JS code cache"),
-        ("GPUCache", ScanCategory::Cache, "桌面端 GPU 缓存", "desktop GPU cache"),
-        ("CachedData", ScanCategory::Cache, "桌面端扩展编译缓存", "desktop CachedData"),
-        ("Crashpad", ScanCategory::Log, "桌面端崩溃转储日志", "desktop crashpad logs"),
-        ("logs", ScanCategory::Log, "桌面端运行日志", "desktop runtime logs"),
-    ] {
+    for (sub, cat, zh_kind, en_kind) in DESKTOP_CACHE_SUBDIRS {
         out.push((
             support_dir.join(sub),
-            cat,
+            cat.clone(),
             format!("{zh_app} {zh_kind}"),
             format!("{en_app} {en_kind}"),
             ItemStatus::Active,
@@ -116,27 +109,63 @@ impl EcosystemTarget for GeminiTarget {
     }
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let gemini = ctx.home_dir.join(".gemini");
+        let ag_dir = gemini.join("antigravity");
+        let ag_cli = gemini.join("antigravity-cli");
+        let ag_browser = gemini.join("antigravity-browser-profile");
         let antigravity = ctx.home_dir.join(".antigravity");
         let ag_cockpit = ctx.home_dir.join(".antigravity_cockpit");
-        let ag_support = ctx.home_dir.join("Library/Application Support/Antigravity");
+        let support = ctx.home_dir.join("Library/Application Support");
+        let ag_support = support.join("Antigravity");
+        let gemini_support = support.join("com.google.GeminiMacOS");
+        let gemini_launcher_support = support.join("com.google.GeminiMacOS.launcher");
         let caches = ctx.home_dir.join("Library/Caches");
         let ag_cache = caches.join("com.google.antigravity");
         let ag_shipit = caches.join("com.google.antigravity.ShipIt");
         let ag_cache_short = caches.join("antigravity");
         let gemini_mac_cache = caches.join("com.google.geminimacos");
         let gemini_launcher_cache = caches.join("com.google.geminimacos.launcher");
+        let xdg_ag_cache = ctx.home_dir.join(".cache/antigravity");
+        let ag_logs = ctx.home_dir.join("Library/Logs/Antigravity");
 
         let mut cleanable = vec![
             entry(gemini.join("tmp"), ScanCategory::Tmp, "Gemini / Antigravity 临时工作文件", "Gemini / Antigravity scratch & temp files", ItemStatus::Active),
             entry(gemini.join("tasks"), ScanCategory::Archive, "Antigravity 后台任务与历史会话归档", "Antigravity background tasks & session logs", ItemStatus::Active),
-            entry(gemini.join("antigravity-browser-profile/Default/Cache"), ScanCategory::Cache, "Antigravity 内置浏览器 Webview 缓存", "Antigravity internal webview cache", ItemStatus::Active),
             entry(ag_cache.clone(), ScanCategory::Cache, "Antigravity macOS 系统应用缓存", "Antigravity macOS Caches", ItemStatus::Active),
             entry(ag_cache_short.clone(), ScanCategory::Cache, "Antigravity 本地缓存", "Antigravity local cache", ItemStatus::Active),
             entry(ag_shipit.clone(), ScanCategory::Updater, "Antigravity 自动更新安装包残留", "Antigravity ShipIt updater cache", ItemStatus::Cold),
             entry(gemini_mac_cache.clone(), ScanCategory::Cache, "Gemini macOS 桌面应用缓存", "Gemini macOS Caches", ItemStatus::Active),
             entry(gemini_launcher_cache.clone(), ScanCategory::Cache, "Gemini 启动器缓存", "Gemini launcher Caches", ItemStatus::Active),
+            entry(xdg_ag_cache.clone(), ScanCategory::Cache, "Antigravity XDG 缓存目录", "Antigravity XDG cache directory", ItemStatus::Active),
+            entry(ag_logs.clone(), ScanCategory::Log, "Antigravity macOS 系统运行日志", "Antigravity macOS Library logs", ItemStatus::Active),
         ];
+
+        for (root, zh_prefix, en_prefix) in [
+            (&ag_dir, "Antigravity", "Antigravity"),
+            (&ag_cli, "Antigravity CLI", "Antigravity CLI"),
+        ] {
+            cleanable.push(entry(root.join("log"), ScanCategory::Log, format!("{zh_prefix} 运行日志"), format!("{en_prefix} runtime logs"), ItemStatus::Active));
+            cleanable.push(entry(root.join("scratch"), ScanCategory::Tmp, format!("{zh_prefix} 临时工作区文件"), format!("{en_prefix} scratch files"), ItemStatus::Active));
+            cleanable.push(entry(root.join("brain"), ScanCategory::Archive, format!("{zh_prefix} 历史 Brain 与产物归档"), format!("{en_prefix} historical brain & artifact archive"), ItemStatus::Cold));
+            cleanable.push(entry(root.join("conversations"), ScanCategory::Archive, format!("{zh_prefix} 历史会话数据库归档"), format!("{en_prefix} historical conversation archive"), ItemStatus::Cold));
+        }
+
+        for (sub, zh, en) in [
+            ("Default/Cache", "Antigravity 内置浏览器 HTTP 缓存", "Antigravity internal webview HTTP cache"),
+            ("Default/Code Cache", "Antigravity 内置浏览器 JS 字节码缓存", "Antigravity internal webview JS code cache"),
+            ("Default/GPUCache", "Antigravity 内置浏览器 GPU 缓存", "Antigravity internal webview GPU cache"),
+            ("Default/DawnWebGPUCache", "Antigravity 内置浏览器 WebGPU 缓存", "Antigravity internal webview DawnWebGPU cache"),
+            ("Default/DawnGraphiteCache", "Antigravity 内置浏览器 Graphite 缓存", "Antigravity internal webview DawnGraphite cache"),
+            ("Default/Service Worker/CacheStorage", "Antigravity 内置浏览器 Service Worker 缓存", "Antigravity internal webview Service Worker cache"),
+            ("GrShaderCache", "Antigravity 内置浏览器 GrShader 缓存", "Antigravity internal webview GrShader cache"),
+            ("ShaderCache", "Antigravity 内置浏览器 Shader 缓存", "Antigravity internal webview Shader cache"),
+            ("GraphiteDawnCache", "Antigravity 内置浏览器 GraphiteDawn 缓存", "Antigravity internal webview GraphiteDawn cache"),
+        ] {
+            cleanable.push(entry(ag_browser.join(sub), ScanCategory::Cache, zh, en, ItemStatus::Active));
+        }
+
         push_desktop_caches(&mut cleanable, &ag_support, "Antigravity", "Antigravity");
+        push_desktop_caches(&mut cleanable, &gemini_support, "Gemini macOS", "Gemini macOS");
+        push_desktop_caches(&mut cleanable, &gemini_launcher_support, "Gemini Launcher", "Gemini Launcher");
 
         (
             vec![
@@ -144,11 +173,15 @@ impl EcosystemTarget for GeminiTarget {
                 antigravity,
                 ag_cockpit,
                 ag_support,
+                gemini_support,
+                gemini_launcher_support,
                 ag_cache,
                 ag_shipit,
                 ag_cache_short,
                 gemini_mac_cache,
                 gemini_launcher_cache,
+                xdg_ag_cache,
+                ag_logs,
             ],
             cleanable,
         )
@@ -163,29 +196,58 @@ impl EcosystemTarget for WorkbuddyTarget {
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let wb = ctx.home_dir.join(".workbuddy");
         let wb_ai = ctx.home_dir.join(".workbuddy-ai");
-        let wb_support = ctx.home_dir.join("Library/Application Support/WorkBuddy");
+        let support = ctx.home_dir.join("Library/Application Support");
+        let wb_support = support.join("WorkBuddy");
+        let wb_ai_support = support.join("WorkBuddy AI");
+        let wb_mac_support = support.join("com.tencent.workbuddy.mac");
         let caches = ctx.home_dir.join("Library/Caches");
         let wb_migration = caches.join("com.tencent.workbuddy.mac.BundleMigration");
         let wb_mac_cache = caches.join("com.tencent.workbuddy.mac");
         let wb_ai_migration = caches.join("com.workbuddy.workbuddy-ai.BundleMigration");
 
         let mut cleanable = vec![
-            entry(wb.join("traces"), ScanCategory::Log, "WorkBuddy 遥测与执行追踪日志", "WorkBuddy telemetry & execution traces", ItemStatus::Active),
-            entry(wb.join("logs"), ScanCategory::Log, "WorkBuddy 应用运行日志", "WorkBuddy runtime application logs", ItemStatus::Active),
-            entry(wb.join("cache"), ScanCategory::Cache, "WorkBuddy 常规缓存", "WorkBuddy general cache", ItemStatus::Active),
-            entry(wb.join("tmp"), ScanCategory::Tmp, "WorkBuddy 临时工作目录", "WorkBuddy temporary working directory", ItemStatus::Active),
-            entry(wb.join("clipboard-images"), ScanCategory::Cache, "WorkBuddy 剪贴板图片缓存", "WorkBuddy clipboard image cache", ItemStatus::Active),
-            entry(wb.join("file-history"), ScanCategory::Cache, "WorkBuddy 编辑器文件历史缓存", "WorkBuddy editor file history cache", ItemStatus::Active),
-            entry(wb.join("file-tree-manifests"), ScanCategory::Cache, "WorkBuddy 工作区目录树清单缓存", "WorkBuddy workspace tree manifest cache", ItemStatus::Active),
-            entry(wb.join("connectors-marketplace"), ScanCategory::Cache, "WorkBuddy 市场扩展目录缓存", "WorkBuddy marketplace cached catalogs", ItemStatus::Active),
             entry(wb_mac_cache.clone(), ScanCategory::Cache, "WorkBuddy macOS 应用缓存", "WorkBuddy macOS Caches", ItemStatus::Active),
             entry(wb_migration.clone(), ScanCategory::Updater, "WorkBuddy 版本迁移安装包残留", "WorkBuddy macOS BundleMigration updater residue", ItemStatus::Cold),
             entry(wb_ai_migration.clone(), ScanCategory::Updater, "WorkBuddy AI 版本迁移安装包残留", "WorkBuddy AI macOS BundleMigration updater residue", ItemStatus::Cold),
         ];
+
+        for (root, label) in [(&wb, "WorkBuddy"), (&wb_ai, "WorkBuddy AI")] {
+            for (sub, cat, zh_kind, en_kind) in [
+                ("traces", ScanCategory::Log, "遥测与执行追踪日志", "telemetry & execution traces"),
+                ("logs", ScanCategory::Log, "应用运行日志", "runtime application logs"),
+                ("audit-log", ScanCategory::Log, "审计日志", "audit logs"),
+                ("cache", ScanCategory::Cache, "常规缓存", "general cache"),
+                ("tmp", ScanCategory::Tmp, "临时工作目录", "temporary working directory"),
+                ("clipboard-images", ScanCategory::Cache, "剪贴板图片缓存", "clipboard image cache"),
+                ("file-history", ScanCategory::Cache, "编辑器文件历史缓存", "editor file history cache"),
+                ("file-tree-manifests", ScanCategory::Cache, "工作区目录树清单缓存", "workspace tree manifest cache"),
+                ("connectors-marketplace", ScanCategory::Cache, "市场扩展目录缓存", "marketplace cached catalogs"),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    ItemStatus::Active,
+                ));
+            }
+        }
+
         push_desktop_caches(&mut cleanable, &wb_support, "WorkBuddy", "WorkBuddy");
+        push_desktop_caches(&mut cleanable, &wb_ai_support, "WorkBuddy AI", "WorkBuddy AI");
+        push_desktop_caches(&mut cleanable, &wb_mac_support, "WorkBuddy macOS", "WorkBuddy macOS");
 
         (
-            vec![wb, wb_ai, wb_support, wb_mac_cache, wb_migration, wb_ai_migration],
+            vec![
+                wb,
+                wb_ai,
+                wb_support,
+                wb_ai_support,
+                wb_mac_support,
+                wb_mac_cache,
+                wb_migration,
+                wb_ai_migration,
+            ],
             cleanable,
         )
     }
@@ -214,11 +276,6 @@ impl EcosystemTarget for QoderTarget {
         let cn_stable_support = support.join("com.qodercn.app.stable");
 
         let mut cleanable = vec![
-            entry(qoder.join("logs"), ScanCategory::Log, "Qoder 应用运行日志", "Qoder application logs", ItemStatus::Active),
-            entry(qoder.join("tmp"), ScanCategory::Tmp, "Qoder 临时碎片文件", "Qoder scratch temporary files", ItemStatus::Active),
-            entry(qoder.join("cache"), ScanCategory::Cache, "Qoder 运行时缓存", "Qoder runtime cache", ItemStatus::Active),
-            entry(qoder.join("shell-snapshots"), ScanCategory::Cache, "Qoder 终端快照缓存", "Qoder terminal snapshots", ItemStatus::Active),
-            entry(qoder.join("file-history"), ScanCategory::Cache, "Qoder 本地文件修改历史缓存", "Qoder local file history", ItemStatus::Active),
             entry(upd.clone(), ScanCategory::Updater, "Qoder 自动更新安装包缓存", "Qoder desktop updater package cache", ItemStatus::Cold),
             entry(upd_cn.clone(), ScanCategory::Updater, "Qoder CN 自动更新安装包缓存", "Qoder CN desktop updater package cache", ItemStatus::Cold),
             entry(app_cache.clone(), ScanCategory::Cache, "Qoder macOS 应用缓存", "Qoder macOS Caches", ItemStatus::Active),
@@ -227,6 +284,29 @@ impl EcosystemTarget for QoderTarget {
             entry(cn_shipit.clone(), ScanCategory::Updater, "Qoder CN ShipIt 更新安装包残留", "Qoder CN ShipIt updater cache", ItemStatus::Cold),
             entry(installer.clone(), ScanCategory::Updater, "Qoder 安装器残留缓存", "Qoder installer cache", ItemStatus::Cold),
         ];
+
+        for (root, label) in [
+            (&qoder, "Qoder"),
+            (&qoder_cn, "Qoder CN"),
+            (&qoder_cli, "Qoder CLI"),
+        ] {
+            for (sub, cat, zh_kind, en_kind) in [
+                ("logs", ScanCategory::Log, "应用运行日志", "application logs"),
+                ("tmp", ScanCategory::Tmp, "临时碎片文件", "scratch temporary files"),
+                ("cache", ScanCategory::Cache, "运行时缓存", "runtime cache"),
+                ("shell-snapshots", ScanCategory::Cache, "终端快照缓存", "terminal snapshots"),
+                ("file-history", ScanCategory::Cache, "本地文件修改历史缓存", "local file history"),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    ItemStatus::Active,
+                ));
+            }
+        }
+
         push_desktop_caches(&mut cleanable, &stable_support, "Qoder", "Qoder");
         push_desktop_caches(&mut cleanable, &cn_stable_support, "Qoder CN", "Qoder CN");
 
@@ -271,6 +351,26 @@ impl EcosystemTarget for KimiTarget {
             entry(kimi_webbridge.join("logs"), ScanCategory::Log, "Kimi WebBridge 日志", "Kimi WebBridge logs", ItemStatus::Active),
             entry(kimi_code_cache.clone(), ScanCategory::Cache, "Kimi Code macOS 缓存", "Kimi Code macOS Caches", ItemStatus::Active),
         ];
+
+        for (root, label) in [(&kimi_code, "Kimi Code"), (&kimi_work, "Kimi Work")] {
+            for (sub, cat, zh_kind, en_kind, status) in [
+                ("logs", ScanCategory::Log, "运行日志", "runtime logs", ItemStatus::Active),
+                ("cache", ScanCategory::Cache, "本地缓存", "local cache", ItemStatus::Active),
+                ("tmp", ScanCategory::Tmp, "临时文件", "temporary files", ItemStatus::Active),
+                ("sessions", ScanCategory::Archive, "历史会话归档", "historical sessions archive", ItemStatus::Cold),
+                ("search-index", ScanCategory::Cache, "代码搜索索引缓存", "code search index cache", ItemStatus::Active),
+                ("updates", ScanCategory::Updater, "自动更新缓存", "updater cache", ItemStatus::Cold),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    status,
+                ));
+            }
+        }
+
         push_desktop_caches(&mut cleanable, &kimi_desktop, "Kimi Desktop", "Kimi Desktop");
 
         (
@@ -290,14 +390,33 @@ impl EcosystemTarget for KiroTarget {
         let kiro_shared = ctx.home_dir.join(".kiro-shared");
         let kiro_cli = ctx.home_dir.join("Library/Application Support/kiro-cli");
         let kirocrew = ctx.home_dir.join("Library/Application Support/kirocrew-desktop");
+        let kirocrew_logs = ctx.home_dir.join("Library/Logs/kirocrew-desktop");
 
         let mut cleanable = vec![
             entry(kiro_cli.join("logs"), ScanCategory::Log, "Kiro CLI 运行日志", "Kiro CLI runtime logs", ItemStatus::Active),
             entry(kiro_cli.join("cache"), ScanCategory::Cache, "Kiro CLI 缓存", "Kiro CLI cache", ItemStatus::Active),
+            entry(kirocrew_logs.clone(), ScanCategory::Log, "KiroCrew Desktop 系统运行日志", "KiroCrew Desktop macOS Library logs", ItemStatus::Active),
         ];
+
+        for (root, label) in [(&kiro, "Kiro"), (&kiro_shared, "Kiro Shared")] {
+            for (sub, cat, zh_kind, en_kind) in [
+                ("logs", ScanCategory::Log, "运行日志", "runtime logs"),
+                ("cache", ScanCategory::Cache, "本地缓存", "local cache"),
+                ("tmp", ScanCategory::Tmp, "临时文件", "temporary files"),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    ItemStatus::Active,
+                ));
+            }
+        }
+
         push_desktop_caches(&mut cleanable, &kirocrew, "KiroCrew Desktop", "KiroCrew Desktop");
 
-        (vec![kiro, kiro_shared, kiro_cli, kirocrew], cleanable)
+        (vec![kiro, kiro_shared, kiro_cli, kirocrew, kirocrew_logs], cleanable)
     }
 }
 
@@ -308,14 +427,26 @@ impl EcosystemTarget for OllamaTarget {
     }
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let ollama = ctx.home_dir.join(".ollama");
-        let cleanable = vec![entry(
-            ollama.join("cache"),
-            ScanCategory::Cache,
-            "Ollama 模型下载与暂存缓存",
-            "Ollama model download and staging cache",
-            ItemStatus::Active,
-        )];
-        (vec![ollama], cleanable)
+        let ollama_logs = ctx.home_dir.join("Library/Logs/Ollama");
+        let ollama_support = ctx.home_dir.join("Library/Application Support/Ollama");
+        let mut cleanable = vec![
+            entry(
+                ollama.join("cache"),
+                ScanCategory::Cache,
+                "Ollama 模型下载与暂存缓存",
+                "Ollama model download and staging cache",
+                ItemStatus::Active,
+            ),
+            entry(
+                ollama_logs.clone(),
+                ScanCategory::Log,
+                "Ollama macOS 系统运行日志",
+                "Ollama macOS Library logs",
+                ItemStatus::Active,
+            ),
+        ];
+        push_desktop_caches(&mut cleanable, &ollama_support, "Ollama", "Ollama");
+        (vec![ollama, ollama_logs, ollama_support], cleanable)
     }
 }
 
@@ -383,15 +514,37 @@ impl EcosystemTarget for TraeTarget {
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let trae = ctx.home_dir.join(".trae");
         let trae_cn = ctx.home_dir.join(".trae-cn");
-        let trae_support = ctx.home_dir.join("Library/Application Support/Trae");
-        let trae_cache = ctx.home_dir.join("Library/Caches/Trae");
+        let support = ctx.home_dir.join("Library/Application Support");
+        let caches = ctx.home_dir.join("Library/Caches");
+        let trae_support = support.join("Trae");
+        let trae_cn_support = support.join("Trae CN");
+        let trae_cache = caches.join("Trae");
+        let trae_cn_cache = caches.join("Trae CN");
         let mut cleanable = vec![
-            entry(trae.join("logs"), ScanCategory::Log, "Trae 运行日志", "Trae runtime logs", ItemStatus::Active),
-            entry(trae.join("tmp"), ScanCategory::Tmp, "Trae 临时文件", "Trae temporary files", ItemStatus::Active),
             entry(trae_cache.clone(), ScanCategory::Cache, "Trae macOS 应用缓存", "Trae macOS Caches", ItemStatus::Active),
+            entry(trae_cn_cache.clone(), ScanCategory::Cache, "Trae CN macOS 应用缓存", "Trae CN macOS Caches", ItemStatus::Active),
         ];
+        for (root, label) in [(&trae, "Trae"), (&trae_cn, "Trae CN")] {
+            for (sub, cat, zh_kind, en_kind) in [
+                ("logs", ScanCategory::Log, "运行日志", "runtime logs"),
+                ("tmp", ScanCategory::Tmp, "临时文件", "temporary files"),
+                ("cache", ScanCategory::Cache, "本地缓存", "local cache"),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    ItemStatus::Active,
+                ));
+            }
+        }
         push_desktop_caches(&mut cleanable, &trae_support, "Trae", "Trae");
-        (vec![trae, trae_cn, trae_support, trae_cache], cleanable)
+        push_desktop_caches(&mut cleanable, &trae_cn_support, "Trae CN", "Trae CN");
+        (
+            vec![trae, trae_cn, trae_support, trae_cn_support, trae_cache, trae_cn_cache],
+            cleanable,
+        )
     }
 }
 
@@ -421,6 +574,7 @@ impl EcosystemTarget for ZCodeTarget {
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let zcode = ctx.home_dir.join(".zcode");
         let v2 = zcode.join("v2");
+        let cli = zcode.join("cli");
         let support = ctx.home_dir.join("Library/Application Support/ZCode");
         let caches = ctx.home_dir.join("Library/Caches");
         let upd = caches.join("@zcodedesktop-updater");
@@ -434,6 +588,12 @@ impl EcosystemTarget for ZCodeTarget {
             entry(v2.join("logs"), ScanCategory::Log, "ZCode v2 运行日志", "ZCode v2 runtime logs", ItemStatus::Active),
             entry(v2.join("crash"), ScanCategory::Tmp, "ZCode v2 崩溃转储文件", "ZCode v2 crash dumps", ItemStatus::Cold),
             entry(v2.join("visualizations"), ScanCategory::Cache, "ZCode 可视化产物缓存", "ZCode visualization artifacts", ItemStatus::Active),
+            entry(cli.join("log"), ScanCategory::Log, "ZCode CLI 运行日志 (log)", "ZCode CLI runtime logs (log)", ItemStatus::Active),
+            entry(cli.join("logs"), ScanCategory::Log, "ZCode CLI 运行日志 (logs)", "ZCode CLI runtime logs (logs)", ItemStatus::Active),
+            entry(cli.join("rollout"), ScanCategory::Log, "ZCode CLI 会话滚动日志", "ZCode CLI rollout session logs", ItemStatus::Active),
+            entry(cli.join("artifacts"), ScanCategory::Cache, "ZCode CLI 产物缓存", "ZCode CLI artifact cache", ItemStatus::Active),
+            entry(cli.join("cache"), ScanCategory::Cache, "ZCode CLI 运行时缓存", "ZCode CLI runtime cache", ItemStatus::Active),
+            entry(cli.join("tmp"), ScanCategory::Tmp, "ZCode CLI 临时文件", "ZCode CLI temporary files", ItemStatus::Active),
             entry(upd.clone(), ScanCategory::Updater, "ZCode 自动更新安装包缓存", "ZCode desktop updater cache", ItemStatus::Cold),
             entry(app_cache.clone(), ScanCategory::Cache, "ZCode macOS 应用缓存", "ZCode macOS Caches", ItemStatus::Active),
             entry(shipit.clone(), ScanCategory::Updater, "ZCode ShipIt 更新安装包残留", "ZCode ShipIt updater cache", ItemStatus::Cold),
@@ -453,12 +613,33 @@ impl EcosystemTarget for DevinTarget {
         let devin = ctx.home_dir.join(".devin");
         let devin_shared = ctx.home_dir.join(".devin-shared");
         let support = ctx.home_dir.join("Library/Application Support/Devin");
+        let devin_cache = ctx.home_dir.join(".cache/devin");
+        let devin_share = ctx.home_dir.join(".local/share/devin");
+        let devin_config = ctx.home_dir.join(".config/devin");
         let mut cleanable = vec![
-            entry(devin.join("logs"), ScanCategory::Log, "Devin 运行日志", "Devin runtime logs", ItemStatus::Active),
-            entry(devin.join("tmp"), ScanCategory::Tmp, "Devin 临时文件", "Devin temporary files", ItemStatus::Active),
+            entry(devin_cache.clone(), ScanCategory::Cache, "Devin XDG 缓存目录", "Devin XDG cache directory", ItemStatus::Active),
+            entry(devin_share.join("logs"), ScanCategory::Log, "Devin 本地运行日志", "Devin local share logs", ItemStatus::Active),
         ];
+        for (root, label) in [(&devin, "Devin"), (&devin_shared, "Devin Shared")] {
+            for (sub, cat, zh_kind, en_kind) in [
+                ("logs", ScanCategory::Log, "运行日志", "runtime logs"),
+                ("tmp", ScanCategory::Tmp, "临时文件", "temporary files"),
+                ("cache", ScanCategory::Cache, "本地缓存", "local cache"),
+            ] {
+                cleanable.push(entry(
+                    root.join(sub),
+                    cat,
+                    format!("{label} {zh_kind}"),
+                    format!("{label} {en_kind}"),
+                    ItemStatus::Active,
+                ));
+            }
+        }
         push_desktop_caches(&mut cleanable, &support, "Devin", "Devin");
-        (vec![devin, devin_shared, support], cleanable)
+        (
+            vec![devin, devin_shared, support, devin_cache, devin_share, devin_config],
+            cleanable,
+        )
     }
 }
 
@@ -503,10 +684,13 @@ impl EcosystemTarget for ZedTarget {
     fn spec(&self, ctx: &CleanerContext) -> (Vec<PathBuf>, Vec<CleanableEntry>) {
         let support = ctx.home_dir.join("Library/Application Support/Zed");
         let cache = ctx.home_dir.join("Library/Caches/Zed");
+        let zed_logs = ctx.home_dir.join("Library/Logs/Zed");
+        let zed_config = ctx.home_dir.join(".config/zed");
         let cleanable = vec![
             entry(support.join("logs"), ScanCategory::Log, "Zed 编辑器与 AI Agent 日志", "Zed editor & AI agent logs", ItemStatus::Active),
+            entry(zed_logs.clone(), ScanCategory::Log, "Zed macOS 系统运行日志", "Zed macOS Library logs", ItemStatus::Active),
             entry(cache.clone(), ScanCategory::Cache, "Zed macOS 应用缓存", "Zed macOS Caches", ItemStatus::Active),
         ];
-        (vec![support, cache], cleanable)
+        (vec![support, cache, zed_logs, zed_config], cleanable)
     }
 }

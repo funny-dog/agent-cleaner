@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use cleaner_core::doctor::{fix_all_doctors, run_all_doctors};
+use cleaner_core::get_overview;
 use cleaner_core::mcp_auditor::{audit_mcp, kill_orphan_process};
 use cleaner_core::mcp_server::run_stdio_server;
 use cleaner_core::scanner::{clean, scan_all};
@@ -79,6 +80,21 @@ enum Commands {
         /// Terminate detected PPID=1 orphan stdio MCP processes
         #[arg(long)]
         kill: bool,
+        /// Optional specific orphan PID to terminate (used with --kill)
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Output aggregated scan, doctor, MCP audit, and trash batches overview
+    Overview {
+        /// Protect files modified within N hours (e.g. 24h, 48h)
+        #[arg(long, default_value = "24h")]
+        older_than: String,
+        /// Language for descriptions and recommendation reasons (zh | en)
+        #[arg(long, default_value = "zh")]
+        lang: String,
         /// Output raw JSON
         #[arg(long)]
         json: bool,
@@ -336,21 +352,31 @@ pub fn run() -> Result<()> {
             }
         }
 
-        Commands::Mcp { kill, json } => {
+        Commands::Mcp { kill, pid, json } => {
             let report = audit_mcp(&ctx);
             let mut kill_results = Vec::new();
             if kill && !report.orphan_processes.is_empty() {
-                let proceed = json
-                    || Confirm::new()
-                        .with_prompt(format!(
-                            "Terminate {} orphan PPID=1 MCP process(es)?",
-                            report.orphan_processes.len()
-                        ))
-                        .default(true)
-                        .interact()?;
-                if proceed {
-                    for p in &report.orphan_processes {
-                        kill_results.push(kill_orphan_process(p.pid));
+                let targets: Vec<_> = match pid {
+                    Some(target_pid) => report
+                        .orphan_processes
+                        .iter()
+                        .filter(|p| p.pid == target_pid)
+                        .collect(),
+                    None => report.orphan_processes.iter().collect(),
+                };
+                if !targets.is_empty() {
+                    let proceed = json
+                        || Confirm::new()
+                            .with_prompt(format!(
+                                "Terminate {} orphan PPID=1 MCP process(es)?",
+                                targets.len()
+                            ))
+                            .default(true)
+                            .interact()?;
+                    if proceed {
+                        for p in targets {
+                            kill_results.push(kill_orphan_process(p.pid));
+                        }
                     }
                 }
             }
@@ -383,6 +409,47 @@ pub fn run() -> Result<()> {
             for k in &kill_results {
                 println!("  Killed PID {} via {} (ok={})", k.pid, k.method, k.success);
             }
+        }
+
+        Commands::Overview {
+            older_than,
+            lang,
+            json,
+        } => {
+            let exempt_hours = parse_hours(&older_than)?;
+            let parsed_lang = parse_lang(&lang);
+            let overview = get_overview(
+                &ctx,
+                &ScanOptions {
+                    exempt_hours: Some(exempt_hours),
+                    agent_filter: None,
+                    lang: Some(parsed_lang),
+                },
+            );
+            let trash = list_batches(&ctx);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "summary": overview.summary,
+                        "agents": overview.agents,
+                        "doctors": overview.doctors,
+                        "mcp": overview.mcp,
+                        "trash": trash,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            println!(
+                "Total disk: {} | Reclaimable: {} | Recommended: {} | Orphan MCPs: {} | Doctor issues: {} | Trash batches: {}",
+                format_bytes(overview.summary.total_disk_usage_bytes).cyan().bold(),
+                format_bytes(overview.summary.total_reclaimable_bytes).yellow().bold(),
+                format_bytes(overview.summary.recommended_bytes).green().bold(),
+                overview.summary.orphan_mcp_count,
+                overview.summary.doctor_issue_count,
+                overview.summary.trash_batch_count,
+            );
         }
 
         Commands::Restore {

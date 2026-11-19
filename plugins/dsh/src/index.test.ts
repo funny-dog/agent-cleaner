@@ -5,7 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { apply, ensureBinaryPath } from './index.js';
+import { apply, ensureBinaryPath, PLUGIN_VERSION } from './index.js';
 
 function createTarGz(fileName: string, content: Buffer): Buffer {
   const BLOCK = 512;
@@ -33,7 +33,7 @@ function createTarGz(fileName: string, content: Buffer): Buffer {
   return gzipSync(Buffer.concat([header, body, trailer]));
 }
 
-test('DSH plugin registers all 4 headless tools and invokes binary with --json', async () => {
+test('DSH plugin registers all 5 headless tools and invokes binary with --json', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-plugin-test-'));
   const stubBin = path.join(tmpDir, 'mock-ac.mjs');
   await fs.writeFile(
@@ -60,7 +60,13 @@ test('DSH plugin registers all 4 headless tools and invokes binary with --json',
 
   assert.deepEqual(
     [...registered.keys()].sort(),
-    ['agent_cleaner_clean', 'agent_cleaner_doctor', 'agent_cleaner_mcp', 'agent_cleaner_scan'],
+    [
+      'agent_cleaner_clean',
+      'agent_cleaner_doctor',
+      'agent_cleaner_mcp',
+      'agent_cleaner_restore',
+      'agent_cleaner_scan',
+    ],
   );
 
   const scanRes = (await registered.get('agent_cleaner_scan').execute({ agent: 'claude' })) as {
@@ -90,10 +96,30 @@ test('DSH plugin registers all 4 headless tools and invokes binary with --json',
   };
   assert.deepEqual(doctorRes.argv, ['doctor', '--fix', '--json']);
 
-  const mcpRes = (await registered.get('agent_cleaner_mcp').execute({ kill: true })) as {
+  const mcpRes = (await registered.get('agent_cleaner_mcp').execute({ kill: true, pid: 12345 })) as {
     argv: string[];
   };
-  assert.deepEqual(mcpRes.argv, ['mcp', '--kill', '--json']);
+  assert.deepEqual(mcpRes.argv, ['mcp', '--kill', '--pid', '12345', '--json']);
+
+  const restoreListRes = (await registered.get('agent_cleaner_restore').execute({})) as {
+    argv: string[];
+  };
+  assert.deepEqual(restoreListRes.argv, ['restore', '--json']);
+
+  const restoreOneRes = (await registered
+    .get('agent_cleaner_restore')
+    .execute({ batchId: 'b1' })) as { argv: string[] };
+  assert.deepEqual(restoreOneRes.argv, ['restore', 'b1', '--json']);
+
+  const purgeOneRes = (await registered
+    .get('agent_cleaner_restore')
+    .execute({ purgeBatchId: 'b2' })) as { argv: string[] };
+  assert.deepEqual(purgeOneRes.argv, ['restore', '--purge', 'b2', '--json']);
+
+  const purgeAllRes = (await registered
+    .get('agent_cleaner_restore')
+    .execute({ purgeAll: true })) as { argv: string[] };
+  assert.deepEqual(purgeAllRes.argv, ['restore', '--purge-all', '--json']);
 
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
@@ -143,6 +169,22 @@ test('DSH plugin auto-downloads binary once on concurrent calls when missing loc
 
     const stat = await fs.stat(expected);
     assert.ok((stat.mode & 0o111) !== 0);
+
+    const versionFile = `${expected}.version`;
+    assert.equal((await fs.readFile(versionFile, 'utf8')).trim(), PLUGIN_VERSION);
+
+    // Stale or missing .version triggers re-download and updates stamp
+    await fs.writeFile(versionFile, '0.1.0\n', 'utf8');
+    const p4 = await ensureBinaryPath({ downloadUrl });
+    assert.equal(p4, expected);
+    assert.equal(downloadCount, 2);
+    assert.equal((await fs.readFile(versionFile, 'utf8')).trim(), PLUGIN_VERSION);
+
+    await fs.rm(versionFile, { force: true });
+    const p5 = await ensureBinaryPath({ downloadUrl });
+    assert.equal(p5, expected);
+    assert.equal(downloadCount, 3);
+    assert.equal((await fs.readFile(versionFile, 'utf8')).trim(), PLUGIN_VERSION);
   } finally {
     process.env.HOME = prevHome;
     process.env.PATH = prevPath;
@@ -305,7 +347,13 @@ test('DSH HTTP routes require connection.requestRejection while keeping headless
       assert.equal(routes.size, 0);
       assert.deepEqual(
         registeredTools.sort(),
-        ['agent_cleaner_clean', 'agent_cleaner_doctor', 'agent_cleaner_mcp', 'agent_cleaner_scan'],
+        [
+          'agent_cleaner_clean',
+          'agent_cleaner_doctor',
+          'agent_cleaner_mcp',
+          'agent_cleaner_restore',
+          'agent_cleaner_scan',
+        ],
       );
     });
   }
@@ -393,6 +441,18 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
       assert.equal(ovJson.data.lang, 'en');
       assert.deepEqual(ovJson.data.agents.argv, ['scan', '--older-than', '48h', '--lang', 'en', '--json']);
       assert.equal(await getExecCount(), 5);
+
+      const rKillOne = await fetch(`${baseUrl}/agent-cleaner/api/mcp-kill`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pid: 9999 }),
+      });
+      assert.equal(rKillOne.status, 200);
+      assert.deepEqual(await rKillOne.json(), {
+        ok: true,
+        data: { argv: ['mcp', '--kill', '--pid', '9999', '--json'] },
+      });
+      assert.equal(await getExecCount(), 6);
     },
   );
 });

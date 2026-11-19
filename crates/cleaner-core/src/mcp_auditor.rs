@@ -1,5 +1,4 @@
-use crate::fs_safe::{get_dir_size, get_file_size, safe_atime_ms};
-use crate::targets::cold_cache::COLD_THRESHOLD_DAYS;
+use crate::targets::cold_cache::collect_cold_caches;
 use crate::targets::discovery::{custom_target_mcp_configs, discover_dynamic_mcp_configs};
 use crate::types::{
     CleanerContext, ColdCacheEntry, KillProcessResult, McpAuditReport, McpEntry, McpProcessInfo,
@@ -13,32 +12,106 @@ use std::thread;
 use std::time::Duration;
 use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System, UpdateKind};
 
-const MS_PER_DAY: u64 = 86_400_000;
+pub(crate) struct RawMcpServer {
+    pub location_path: Vec<String>,
+    pub name: String,
+    pub transport: McpTransport,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub url: Option<String>,
+}
 
-pub(crate) fn command_exists(cmd: &str) -> bool {
-    if cmd.is_empty() {
-        return false;
+fn candidate_exists_in_dir(dir: &Path, bin: &str) -> bool {
+    if dir.join(bin).is_file() {
+        return true;
     }
-    let path = Path::new(cmd);
-    if path.is_absolute() {
-        return path.exists();
-    }
-    if let Some(path_var) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(cmd);
-            if candidate.is_file() {
-                return true;
-            }
-            #[cfg(windows)]
-            {
-                let exe = dir.join(format!("{cmd}.exe"));
-                if exe.is_file() {
-                    return true;
-                }
-            }
+    #[cfg(windows)]
+    {
+        if dir.join(format!("{bin}.exe")).is_file() {
+            return true;
         }
     }
     false
+}
+
+fn push_versioned_bin_dirs(base: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let candidate = entry.path().join(suffix);
+        if candidate.is_dir() {
+            out.push(candidate);
+        }
+    }
+}
+
+pub(crate) fn command_exists(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let raw_path = Path::new(trimmed);
+    if raw_path.is_absolute() && raw_path.exists() {
+        return true;
+    }
+
+    let bin = trimmed.split_whitespace().next().unwrap_or("");
+    if bin.is_empty() {
+        return false;
+    }
+
+    if let Some(rest) = bin.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).is_file();
+        }
+        return false;
+    }
+
+    let path = Path::new(bin);
+    if path.is_absolute() {
+        return path.exists();
+    }
+
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            if candidate_exists_in_dir(&dir, bin) {
+                return true;
+            }
+        }
+    }
+
+    let mut fallback_dirs = vec![
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/opt/homebrew/sbin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        for rel in [
+            ".local/bin",
+            ".cargo/bin",
+            ".bun/bin",
+            ".deno/bin",
+            ".volta/bin",
+            ".asdf/shims",
+            ".pyenv/shims",
+            "go/bin",
+        ] {
+            fallback_dirs.push(home.join(rel));
+        }
+        push_versioned_bin_dirs(&home.join(".nvm/versions/node"), "bin", &mut fallback_dirs);
+        push_versioned_bin_dirs(&home.join(".fnm/node-versions"), "installation/bin", &mut fallback_dirs);
+        push_versioned_bin_dirs(
+            &home.join("Library/Application Support/fnm/node-versions"),
+            "installation/bin",
+            &mut fallback_dirs,
+        );
+    }
+
+    fallback_dirs
+        .iter()
+        .any(|dir| candidate_exists_in_dir(dir, bin))
 }
 
 fn detect_transport(
@@ -48,11 +121,18 @@ fn detect_transport(
     command: Option<&str>,
 ) -> McpTransport {
     if let Some(t) = transport.or(typ) {
-        if t.eq_ignore_ascii_case("sse") {
+        let lower = t.trim().to_ascii_lowercase();
+        if lower == "sse" {
             return McpTransport::Sse;
         }
-        if t.eq_ignore_ascii_case("http") {
+        if matches!(
+            lower.as_str(),
+            "http" | "streamable-http" | "streamable_http" | "remote"
+        ) {
             return McpTransport::Http;
+        }
+        if matches!(lower.as_str(), "stdio" | "local") {
+            return McpTransport::Stdio;
         }
     }
     if url.is_some() && command.is_none() {
@@ -61,76 +141,213 @@ fn detect_transport(
     McpTransport::Stdio
 }
 
-fn extract_entries_from_json_value(
-    val: &serde_json::Value,
-    config_path: &Path,
-    agent: &str,
-) -> Vec<McpEntry> {
-    let Some(servers) = val
-        .get("mcpServers")
-        .or_else(|| val.get("mcp").and_then(|m| m.get("servers")))
-        .or_else(|| val.get("context_servers"))
-        .and_then(|v| v.as_object())
-    else {
-        return Vec::new();
+fn extract_string_array(val: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    val.and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|x| x.as_str().map(ToString::to_string))
+            .collect()
+    })
+}
+
+pub(crate) fn extract_server_spec(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> (McpTransport, Option<String>, Option<Vec<String>>, Option<String>) {
+    let url = obj
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+
+    let (command, args) = match obj.get("command") {
+        Some(serde_json::Value::String(s)) => {
+            (Some(s.clone()), extract_string_array(obj.get("args")))
+        }
+        Some(serde_json::Value::Array(arr)) => {
+            let parts: Vec<String> = arr
+                .iter()
+                .filter_map(|x| x.as_str().map(ToString::to_string))
+                .collect();
+            if parts.is_empty() {
+                (None, extract_string_array(obj.get("args")))
+            } else {
+                let cmd = parts[0].clone();
+                let tail = if parts.len() > 1 {
+                    Some(parts[1..].to_vec())
+                } else {
+                    extract_string_array(obj.get("args"))
+                };
+                (Some(cmd), tail)
+            }
+        }
+        Some(serde_json::Value::Object(cmd_obj)) => {
+            let cmd = cmd_obj
+                .get("path")
+                .or_else(|| cmd_obj.get("command"))
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string);
+            let args = extract_string_array(cmd_obj.get("args"))
+                .or_else(|| extract_string_array(obj.get("args")));
+            (cmd, args)
+        }
+        _ => (None, extract_string_array(obj.get("args"))),
     };
-    servers
-        .iter()
-        .filter_map(|(name, cfg)| {
-            let obj = cfg.as_object()?;
-            let command = obj
-                .get("command")
-                .and_then(|v| v.as_str())
-                .map(ToString::to_string);
-            let url = obj
-                .get("url")
-                .and_then(|v| v.as_str())
-                .map(ToString::to_string);
-            let args = obj.get("args").and_then(|v| v.as_array()).map(|arr| {
-                arr.iter()
-                    .filter_map(|x| x.as_str().map(ToString::to_string))
-                    .collect()
-            });
-            let transport = detect_transport(
-                obj.get("transport").and_then(|v| v.as_str()),
-                obj.get("type").and_then(|v| v.as_str()),
-                url.as_deref(),
-                command.as_deref(),
-            );
-            Some(McpEntry {
+
+    let transport = detect_transport(
+        obj.get("transport").and_then(|v| v.as_str()),
+        obj.get("type").and_then(|v| v.as_str()),
+        url.as_deref(),
+        command.as_deref(),
+    );
+
+    (transport, command, args, url)
+}
+
+fn collect_server_map(
+    servers: &serde_json::Map<String, serde_json::Value>,
+    prefix: &[&str],
+    out: &mut Vec<RawMcpServer>,
+) {
+    for (name, cfg) in servers {
+        let Some(obj) = cfg.as_object() else {
+            continue;
+        };
+        let (transport, command, args, url) = extract_server_spec(obj);
+        let mut location_path: Vec<String> = prefix.iter().map(|s| (*s).to_string()).collect();
+        location_path.push(name.clone());
+        out.push(RawMcpServer {
+            location_path,
+            name: name.clone(),
+            transport,
+            command,
+            args,
+            url,
+        });
+    }
+}
+
+pub(crate) fn extract_mcp_servers_from_value(val: &serde_json::Value) -> Vec<RawMcpServer> {
+    let mut out = Vec::new();
+
+    for top_key in ["mcpServers", "mcp_servers", "context_servers"] {
+        if let Some(servers) = val.get(top_key).and_then(|v| v.as_object()) {
+            collect_server_map(servers, &[top_key], &mut out);
+        }
+    }
+
+    if let Some(mcp_obj) = val.get("mcp").and_then(|v| v.as_object()) {
+        let mut servers_is_nested_map = false;
+        if let Some(servers_obj) = mcp_obj.get("servers").and_then(|v| v.as_object()) {
+            let looks_like_single_server =
+                servers_obj.contains_key("command") || servers_obj.contains_key("url");
+            if !looks_like_single_server {
+                servers_is_nested_map = true;
+                collect_server_map(servers_obj, &["mcp", "servers"], &mut out);
+            }
+        }
+        for (name, cfg) in mcp_obj {
+            if servers_is_nested_map && name == "servers" {
+                continue;
+            }
+            let Some(obj) = cfg.as_object() else {
+                continue;
+            };
+            if !(obj.contains_key("command")
+                || obj.contains_key("url")
+                || obj.contains_key("type")
+                || obj.contains_key("transport"))
+            {
+                continue;
+            }
+            let (transport, command, args, url) = extract_server_spec(obj);
+            out.push(RawMcpServer {
+                location_path: vec!["mcp".to_string(), name.clone()],
                 name: name.clone(),
                 transport,
                 command,
                 args,
                 url,
-                config_path: config_path.to_string_lossy().to_string(),
-                agent: agent.to_string(),
-            })
+            });
+        }
+    }
+
+    if let Some(projects) = val.get("projects").and_then(|v| v.as_object()) {
+        for (proj_path, proj_val) in projects {
+            if let Some(servers) = proj_val.get("mcpServers").and_then(|v| v.as_object()) {
+                collect_server_map(servers, &["projects", proj_path, "mcpServers"], &mut out);
+            }
+        }
+    }
+
+    if let Some(servers) = val.get("servers").and_then(|v| v.as_object()) {
+        let looks_like_mcp_map = servers.values().any(|v| {
+            v.as_object()
+                .is_some_and(|o| o.contains_key("command") || o.contains_key("url"))
+        });
+        if looks_like_mcp_map {
+            collect_server_map(servers, &["servers"], &mut out);
+        }
+    }
+
+    out
+}
+
+fn extract_entries_from_json_value(
+    val: &serde_json::Value,
+    config_path: &Path,
+    agent: &str,
+) -> Vec<McpEntry> {
+    let config_str = config_path.to_string_lossy().to_string();
+    extract_mcp_servers_from_value(val)
+        .into_iter()
+        .map(|srv| McpEntry {
+            name: srv.name,
+            transport: srv.transport,
+            command: srv.command,
+            args: srv.args,
+            url: srv.url,
+            config_path: config_str.clone(),
+            agent: agent.to_string(),
         })
         .collect()
 }
 
 pub(crate) fn infer_agent_from_path(config_path: &Path) -> String {
-    let lower = config_path.to_string_lossy().to_lowercase();
+    let lower = config_path
+        .to_string_lossy()
+        .to_lowercase()
+        .replace('\\', "/");
     for (needle, agent) in [
+        ("roo-cline", "roo"),
+        ("claude-dev", "cline"),
+        ("kilocode", "kilocode"),
         (".claude", "claude"),
+        ("/claude", "claude"),
         ("opencode", "opencode"),
         (".codex", "codex"),
         (".dsh", "dsh"),
         (".cursor", "cursor"),
+        ("/cursor/", "cursor"),
         ("windsurf", "windsurf"),
         (".codeium", "windsurf"),
         (".gemini", "gemini"),
         ("antigravity", "gemini"),
+        (".workbuddy", "workbuddy"),
+        ("/workbuddy", "workbuddy"),
         (".kiro", "kiro"),
+        ("/kiro", "kiro"),
         (".kimi", "kimi"),
+        ("/kimi", "kimi"),
         (".qoder", "qoder"),
+        ("/qoder", "qoder"),
         (".trae", "trae"),
+        ("/trae", "trae"),
         (".continue", "continue"),
         (".copilot", "copilot"),
         (".zcode", "zcode"),
+        ("/zcode", "zcode"),
         (".codebuddy", "codebuddy"),
+        ("/codebuddy", "codebuddy"),
         (".devin", "devin"),
+        ("/devin/", "devin"),
         ("/zed/", "zed"),
     ] {
         if lower.contains(needle) {
@@ -203,15 +420,39 @@ pub fn known_config_paths(ctx: &CleanerContext) -> Vec<PathBuf> {
         ctx.home_dir.join(".gemini/settings.json"),
         ctx.home_dir.join(".kiro/settings/mcp.json"),
         ctx.home_dir.join(".kimi/mcp.json"),
+        ctx.home_dir.join(".kimi-code/mcp.json"),
+        ctx.home_dir.join(".kimi-work/mcp.json"),
         ctx.home_dir.join(".qoder/mcp.json"),
+        ctx.home_dir.join(".qoder/settings.json"),
+        ctx.home_dir.join(".qoder-cn/mcp.json"),
+        ctx.home_dir.join(".qoder-cn/settings.json"),
         ctx.home_dir.join(".qoder.json"),
+        ctx.home_dir.join(".workbuddy/mcp.json"),
+        ctx.home_dir.join(".workbuddy-ai/mcp.json"),
         ctx.home_dir.join(".trae/mcp.json"),
+        ctx.home_dir.join(".trae-cn/mcp.json"),
         ctx.home_dir.join(".continue/config.json"),
         ctx.home_dir.join(".copilot/mcp-config.json"),
         ctx.home_dir.join(".zcode/mcp.json"),
         ctx.home_dir.join(".codebuddy/mcp.json"),
         ctx.home_dir.join("Library/Application Support/Zed/settings.json"),
     ];
+    for variant in [
+        "Claude",
+        "Claude-3p",
+        "Claude-kiro",
+        "Claude-qoder-cn-3p",
+        "Claude-wb-cn",
+        "Claude-wb-cn-3p",
+        "MultiClaude",
+    ] {
+        paths.push(
+            ctx.home_dir
+                .join("Library/Application Support")
+                .join(variant)
+                .join("claude_desktop_config.json"),
+        );
+    }
     paths.extend(custom_target_mcp_configs(ctx));
     paths.extend(discover_dynamic_mcp_configs(ctx));
 
@@ -221,35 +462,106 @@ pub fn known_config_paths(ctx: &CleanerContext) -> Vec<PathBuf> {
 }
 
 pub fn scan_cold_caches(ctx: &CleanerContext) -> Vec<ColdCacheEntry> {
-    let now = ctx.now();
-    let mut entries = Vec::new();
-    for (source, dir) in [
-        ("npm/_npx", ctx.home_dir.join(".npm/_npx")),
-        ("uv", ctx.home_dir.join(".cache/uv")),
-    ] {
-        let Ok(read_dir) = fs::read_dir(&dir) else {
+    collect_cold_caches(ctx)
+}
+
+const GENERIC_RUNNERS: &[&str] = &[
+    "npx", "npm", "pnpm", "yarn", "bun", "bunx", "deno", "node", "python", "python3", "uv", "uvx",
+    "pipx", "sh", "bash", "zsh", "docker",
+];
+
+fn strip_pkg_version(arg: &str) -> &str {
+    if arg.starts_with("http://")
+        || arg.starts_with("https://")
+        || (arg.contains('/') && !arg.starts_with('@'))
+    {
+        return arg;
+    }
+    if let Some(rest) = arg.strip_prefix('@') {
+        if let Some(slash_idx) = rest.find('/') {
+            if let Some(at_idx) = rest[slash_idx..].find('@') {
+                return &arg[..1 + slash_idx + at_idx];
+            }
+        }
+        return arg;
+    }
+    arg.split('@').next().unwrap_or(arg)
+}
+
+fn extract_effective_arg_needles(args: &[String]) -> Vec<String> {
+    let mut needles = Vec::new();
+    for raw in args {
+        let trimmed = raw.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('-')
+            || matches!(
+                trimmed,
+                "exec" | "run" | "dlx" | "x" | "stdio" | "true" | "false"
+            )
+        {
             continue;
-        };
-        for item in read_dir.flatten() {
-            let p = item.path();
-            let atime = safe_atime_ms(&p, now);
-            let days = now.saturating_sub(atime) / MS_PER_DAY;
-            if days > COLD_THRESHOLD_DAYS {
-                let size_bytes = if p.is_dir() {
-                    get_dir_size(&p)
-                } else {
-                    get_file_size(&p)
-                };
-                entries.push(ColdCacheEntry {
-                    source: source.to_string(),
-                    path: p.to_string_lossy().to_string(),
-                    size_bytes,
-                    last_access_days: days,
-                });
+        }
+        let stripped = strip_pkg_version(trimmed);
+        if stripped.len() >= 3 {
+            needles.push(stripped.to_string());
+        }
+        if stripped != trimmed && trimmed.len() >= 3 {
+            needles.push(trimmed.to_string());
+        }
+    }
+    needles
+}
+
+fn entry_matches_process_cmd(entry: &McpEntry, proc_cmd: &str) -> bool {
+    let Some(cmd_raw) = entry.command.as_deref() else {
+        return false;
+    };
+    let cmd_str = cmd_raw.trim();
+    if cmd_str.is_empty() {
+        return false;
+    }
+    let basename = Path::new(cmd_str)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(cmd_str)
+        .strip_suffix(".exe")
+        .unwrap_or_else(|| {
+            Path::new(cmd_str)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(cmd_str)
+        });
+    let is_generic = GENERIC_RUNNERS.contains(&basename.to_ascii_lowercase().as_str());
+
+    let effective_args = entry
+        .args
+        .as_deref()
+        .map(extract_effective_arg_needles)
+        .unwrap_or_default();
+
+    if is_generic && !effective_args.is_empty() {
+        return effective_args
+            .iter()
+            .any(|needle| proc_cmd.contains(needle.as_str()));
+    }
+
+    if proc_cmd.contains(cmd_str) {
+        return true;
+    }
+
+    if !is_generic && basename.len() >= 4 {
+        if let Some(first_tok) = proc_cmd.split_whitespace().next() {
+            let proc_base = Path::new(first_tok)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(first_tok);
+            if proc_base == basename {
+                return true;
             }
         }
     }
-    entries
+
+    false
 }
 
 pub fn scan_orphan_mcp_processes(entries: &[McpEntry]) -> Vec<McpProcessInfo> {
@@ -290,14 +602,19 @@ pub fn scan_orphan_mcp_processes(entries: &[McpEntry]) -> Vec<McpProcessInfo> {
             cmd_parts.join(" ")
         };
 
-        let matched = stdio_entries.iter().find(|e| {
-            e.command
-                .as_deref()
-                .is_some_and(|cmd| !cmd.is_empty() && command.contains(cmd))
-        });
+        let matched = stdio_entries
+            .iter()
+            .find(|e| entry_matches_process_cmd(e, &command));
 
-        let by_marker = (command.contains("@modelcontextprotocol") || command.contains("mcp-server"))
-            && command.contains("stdio");
+        let lower_cmd = command.to_ascii_lowercase();
+        let is_remote_service = lower_cmd.contains("--port")
+            || lower_cmd.contains("sse")
+            || lower_cmd.contains("streamable-http");
+        let by_marker = !is_remote_service
+            && (((lower_cmd.contains("@modelcontextprotocol") || lower_cmd.contains("mcp-server"))
+                && lower_cmd.contains("stdio"))
+                || lower_cmd.contains("fastmcp")
+                || lower_cmd.contains("mcp-proxy"));
 
         if matched.is_some() || by_marker {
             orphans.push(McpProcessInfo {
@@ -428,5 +745,59 @@ pub fn kill_orphan_process(pid: u32) -> KillProcessResult {
             success: !is_pid_alive(pid),
             method: "SIGKILL".to_string(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_entry(command: &str, args: Vec<&str>) -> McpEntry {
+        McpEntry {
+            name: "test".to_string(),
+            transport: McpTransport::Stdio,
+            command: Some(command.to_string()),
+            args: if args.is_empty() {
+                None
+            } else {
+                Some(args.into_iter().map(ToString::to_string).collect())
+            },
+            url: None,
+            config_path: "/tmp/mcp.json".to_string(),
+            agent: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_entry_matches_process_cmd_precision() {
+        let npx_entry = mk_entry(
+            "npx",
+            vec!["-y", "mcp-proxy-for-aws@latest", "https://aws-mcp.us-east-1.api.aws/mcp"],
+        );
+        assert!(entry_matches_process_cmd(
+            &npx_entry,
+            "node /Users/erhu/.npm/_npx/abc/node_modules/.bin/mcp-proxy-for-aws"
+        ));
+        assert!(!entry_matches_process_cmd(&npx_entry, "npx -y other-pkg"));
+
+        let node_entry = mk_entry(
+            "node",
+            vec!["/Users/erhu/.local/mcp/desktop-commander/dist/index.js"],
+        );
+        assert!(entry_matches_process_cmd(
+            &node_entry,
+            "node /Users/erhu/.local/mcp/desktop-commander/dist/index.js"
+        ));
+        assert!(!entry_matches_process_cmd(
+            &node_entry,
+            "node /Users/erhu/my-web-app/server.js"
+        ));
+
+        let bin_entry = mk_entry("/Users/erhu/.dbx/bin/dbx-mcp", vec![]);
+        assert!(entry_matches_process_cmd(
+            &bin_entry,
+            "/Users/erhu/.dbx/bin/dbx-mcp --stdio"
+        ));
+        assert!(entry_matches_process_cmd(&bin_entry, "dbx-mcp --stdio"));
     }
 }

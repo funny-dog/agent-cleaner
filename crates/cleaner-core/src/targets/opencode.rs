@@ -12,6 +12,7 @@ impl AgentTarget for OpenCodeTarget {
 
     fn claimed_dirs(&self, ctx: &CleanerContext) -> Vec<PathBuf> {
         vec![
+            ctx.home_dir.join(".opencode"),
             ctx.home_dir.join(".local/share/opencode"),
             ctx.home_dir.join(".config/opencode"),
             ctx.home_dir.join(".cache/opencode"),
@@ -20,6 +21,7 @@ impl AgentTarget for OpenCodeTarget {
 
     fn scan(&self, ctx: &CleanerContext, exempt_hours: u64, lang: Language) -> ScanResult {
         let now_ms = ctx.now();
+        let dot_dir = ctx.home_dir.join(".opencode");
         let share_dir = ctx.home_dir.join(".local/share/opencode");
         let config_dir = ctx.home_dir.join(".config/opencode");
         let cache_dir = ctx.home_dir.join(".cache/opencode");
@@ -31,6 +33,9 @@ impl AgentTarget for OpenCodeTarget {
             (share_dir.join("log"), ScanCategory::Log, "OpenCode 运行日志", "OpenCode application logs"),
             (share_dir.join("bin"), ScanCategory::Cache, "OpenCode 语言服务与工具二进制缓存", "OpenCode language service & tools binary cache"),
             (cache_dir.clone(), ScanCategory::Cache, "OpenCode XDG 缓存目录", "OpenCode XDG cache directory"),
+            (dot_dir.join("logs"), ScanCategory::Log, "OpenCode 本地运行日志", "OpenCode dotdir runtime logs"),
+            (dot_dir.join("cache"), ScanCategory::Cache, "OpenCode 本地缓存目录", "OpenCode dotdir cache"),
+            (dot_dir.join("tmp"), ScanCategory::Tmp, "OpenCode 临时文件目录", "OpenCode dotdir temporary files"),
         ] {
             push_dir_item(
                 &mut items,
@@ -46,8 +51,10 @@ impl AgentTarget for OpenCodeTarget {
             );
         }
 
-        let disk_usage_bytes =
-            get_dir_size(&share_dir) + get_dir_size(&config_dir) + get_dir_size(&cache_dir);
+        let disk_usage_bytes = get_dir_size(&dot_dir)
+            + get_dir_size(&share_dir)
+            + get_dir_size(&config_dir)
+            + get_dir_size(&cache_dir);
         let total_bytes = items.iter().map(|i| i.size_bytes).sum();
 
         ScanResult {

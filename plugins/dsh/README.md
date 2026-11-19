@@ -12,7 +12,7 @@ Supports **Claude Code**, **OpenCode**, **Codex CLI**, **DSH**, **Gemini / Antig
 
 ## What You Get
 
-- **Visual Cleanup Panel in DSH**: Open **Agent Cleaner** from the left sidebar to inspect disk usage by tool, filter by `Recommended` / `Optional` / `Active Guard (24h)`, preview with Dry-Run, and clean selected items.
+- **Visual Cleanup Panel in DSH**: Open **Agent Cleaner** from the left sidebar to inspect disk usage by tool, filter by `Recommended` / `Optional` / `Active Guard (24h)`, and clean selected items.
 - **Built-in DSH Agent Tools**: Registers `agent_cleaner_scan`, `agent_cleaner_clean`, `agent_cleaner_doctor`, and `agent_cleaner_mcp` so you can simply ask DSH in chat:
   - *"Scan my AI coding tool caches and tell me what can be safely cleaned."*
   - *"Check for orphan MCP processes and broken MCP configs."*
