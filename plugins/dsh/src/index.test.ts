@@ -190,3 +190,209 @@ test('DSH client bundle registers sidebar.panellist and main slots via __ModuleL
   assert.match(clientJs, /color-scheme:\s*light/);
   assert.doesNotMatch(clientJs, /--dsw-alias-bg-(?:primary|secondary|tertiary)/);
 });
+
+async function withRouteHarness(
+  connectionService: Record<string, any> | undefined,
+  run: (opts: {
+    baseUrl: string;
+    routes: Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> | void>;
+    registeredTools: string[];
+    injectedDeps: string[][];
+    getExecCount: () => Promise<number>;
+  }) => Promise<void>,
+): Promise<void> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-plugin-http-'));
+  const logFile = path.join(tmpDir, 'exec.log');
+  const stubBin = path.join(tmpDir, 'mock-ac.mjs');
+  await fs.writeFile(
+    stubBin,
+    [
+      '#!/usr/bin/env node',
+      "import fs from 'node:fs';",
+      `fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
+      'console.log(JSON.stringify({ argv: process.argv.slice(2) }));',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+
+  const routes = new Map<
+    string,
+    (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> | void
+  >();
+  const registeredTools: string[] = [];
+  const injectedDeps: string[][] = [];
+
+  const services: Record<string, any> = {
+    tools: {
+      register(def: { name: string }) {
+        registeredTools.push(def.name);
+      },
+    },
+    webServer: {
+      register(def: {
+        kind: string;
+        path: string;
+        handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> | void;
+      }) {
+        routes.set(def.path, def.handler);
+        return () => routes.delete(def.path);
+      },
+    },
+  };
+  if (connectionService !== undefined) {
+    services.connection = connectionService;
+  }
+
+  const makeCtx = () => ({
+    get(svc: string) {
+      return services[svc];
+    },
+    effect(fn: () => unknown) {
+      return fn();
+    },
+    inject(deps: string[], cb: (sctx: any) => void) {
+      injectedDeps.push(deps);
+      if (deps.every((d) => services[d] !== undefined)) {
+        cb(makeCtx());
+      }
+    },
+  });
+
+  apply(makeCtx(), { binaryPath: stubBin, exemptRecentHours: 24 });
+
+  const server = http.createServer(async (req, res) => {
+    const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
+    const handler = routes.get(pathname);
+    if (!handler) {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    await handler(req, res);
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const addr = server.address();
+  assert.ok(addr && typeof addr !== 'string');
+
+  const getExecCount = async () => {
+    try {
+      const content = await fs.readFile(logFile, 'utf8');
+      return content.trim() ? content.trim().split('\n').length : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  try {
+    await run({
+      baseUrl: `http://127.0.0.1:${addr.port}`,
+      routes,
+      registeredTools,
+      injectedDeps,
+      getExecCount,
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test('DSH HTTP routes require connection.requestRejection while keeping headless tools registered', async () => {
+  for (const conn of [undefined, {}]) {
+    await withRouteHarness(conn, async ({ routes, registeredTools, injectedDeps }) => {
+      assert.deepEqual(injectedDeps, [['webServer', 'connection']]);
+      assert.equal(routes.size, 0);
+      assert.deepEqual(
+        registeredTools.sort(),
+        ['agent_cleaner_clean', 'agent_cleaner_doctor', 'agent_cleaner_mcp', 'agent_cleaner_scan'],
+      );
+    });
+  }
+});
+
+test('DSH HTTP routes enforce connection.requestRejection before method check (401, 403, and fail-closed throw)', async () => {
+  let mode: '401' | '403' | 'throw' = '401';
+  await withRouteHarness(
+    {
+      requestRejection: () => {
+        if (mode === '401') return 401;
+        if (mode === '403') return 403;
+        throw new Error('host auth unavailable');
+      },
+    },
+    async ({ baseUrl, getExecCount }) => {
+      // Wrong HTTP method on /clean must still return 401/403 (auth runs before 405 check)
+      mode = '401';
+      const r401 = await fetch(`${baseUrl}/agent-cleaner/api/clean`, { method: 'GET' });
+      assert.equal(r401.status, 401);
+      assert.equal(r401.headers.get('x-content-type-options'), 'nosniff');
+      assert.deepEqual(await r401.json(), { ok: false, error: 'Unauthorized' });
+
+      mode = '403';
+      const r403 = await fetch(`${baseUrl}/agent-cleaner/api/overview`, { method: 'GET' });
+      assert.equal(r403.status, 403);
+      assert.equal(r403.headers.get('x-content-type-options'), 'nosniff');
+      assert.deepEqual(await r403.json(), { ok: false, error: 'Forbidden' });
+
+      mode = 'throw';
+      const rThrow = await fetch(`${baseUrl}/agent-cleaner/api/purge`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      assert.equal(rThrow.status, 403);
+      assert.equal(rThrow.headers.get('x-content-type-options'), 'nosniff');
+      assert.deepEqual(await rThrow.json(), { ok: false, error: 'Forbidden' });
+
+      assert.equal(await getExecCount(), 0);
+    },
+  );
+});
+
+test('DSH HTTP routes require application/json on POST and allow authenticated requests', async () => {
+  await withRouteHarness(
+    { requestRejection: () => undefined },
+    async ({ baseUrl, getExecCount }) => {
+      const r415 = await fetch(`${baseUrl}/agent-cleaner/api/clean`, {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      assert.equal(r415.status, 415);
+      assert.deepEqual(await r415.json(), {
+        ok: false,
+        error: 'Content-Type must be application/json',
+      });
+      assert.equal(await getExecCount(), 0);
+
+      const rClean = await fetch(`${baseUrl}/agent-cleaner/api/clean`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ exemptHours: 12, lang: 'en', dryRun: true }),
+      });
+      assert.equal(rClean.status, 200);
+      assert.deepEqual(await rClean.json(), {
+        ok: true,
+        data: {
+          argv: ['clean', '--yes', '--older-than', '12h', '--lang', 'en', '--dry-run', '--json'],
+        },
+      });
+      assert.equal(await getExecCount(), 1);
+
+      const rOverview = await fetch(`${baseUrl}/agent-cleaner/api/overview?hours=48&lang=en`, {
+        method: 'GET',
+      });
+      assert.equal(rOverview.status, 200);
+      const ovJson = (await rOverview.json()) as {
+        ok: boolean;
+        data: { exemptHours: number; lang: string; agents: { argv: string[] } };
+      };
+      assert.equal(ovJson.ok, true);
+      assert.equal(ovJson.data.exemptHours, 48);
+      assert.equal(ovJson.data.lang, 'en');
+      assert.deepEqual(ovJson.data.agents.argv, ['scan', '--older-than', '48h', '--lang', 'en', '--json']);
+      assert.equal(await getExecCount(), 5);
+    },
+  );
+});

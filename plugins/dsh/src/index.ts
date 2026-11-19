@@ -250,6 +250,7 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, {
     'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
+    'x-content-type-options': 'nosniff',
   });
   res.end(JSON.stringify(payload));
 }
@@ -286,9 +287,17 @@ function registerHttpRoutes(
   defaultHours: number,
 ): void {
   if (typeof ctx?.inject !== 'function') return;
-  ctx.inject(['webServer'], (sctx: any) => {
+  ctx.inject(['webServer', 'connection'], (sctx: any) => {
     const webServer = resolveService(sctx, 'webServer');
-    if (!webServer || typeof webServer.register !== 'function') return;
+    const connection = resolveService(sctx, 'connection');
+    if (
+      !webServer ||
+      typeof webServer.register !== 'function' ||
+      !connection ||
+      typeof connection.requestRejection !== 'function'
+    ) {
+      return;
+    }
 
     const mount = () => {
       const route = (
@@ -300,11 +309,42 @@ function registerHttpRoutes(
           kind: 'exact',
           path: routePath,
           handler: async (req: IncomingMessage, res: ServerResponse) => {
+            let refused: number | undefined;
+            try {
+              refused = connection.requestRejection(req);
+            } catch {
+              refused = 403;
+            }
+            if (refused !== undefined) {
+              if (typeof req.resume === 'function') req.resume();
+              sendJson(res, refused, {
+                ok: false,
+                error: refused === 401 ? 'Unauthorized' : 'Forbidden',
+              });
+              return;
+            }
+
             if (req.method !== method) {
               res.writeHead(405, { allow: method });
               res.end();
               return;
             }
+
+            if (method === 'POST') {
+              const mediaType = String(req.headers['content-type'] ?? '')
+                .split(';')[0]
+                ?.trim()
+                .toLowerCase();
+              if (mediaType !== 'application/json') {
+                if (typeof req.resume === 'function') req.resume();
+                sendJson(res, 415, {
+                  ok: false,
+                  error: 'Content-Type must be application/json',
+                });
+                return;
+              }
+            }
+
             try {
               const body = method === 'POST' ? await readJsonBody(req) : {};
               const data = await fn(body, req);

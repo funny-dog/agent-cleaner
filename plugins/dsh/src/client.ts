@@ -386,9 +386,18 @@ function formatBytes(bytes: number): string {
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
+    credentials: init?.credentials ?? 'same-origin',
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
-  const payload = (await res.json()) as { ok?: boolean; data?: T; error?: string };
+  let payload: { ok?: boolean; data?: T; error?: string } = {};
+  try {
+    const parsed = await res.json();
+    if (parsed && typeof parsed === 'object') {
+      payload = parsed as { ok?: boolean; data?: T; error?: string };
+    }
+  } catch {
+    // Non-JSON error response (e.g., plain text 401/403 from host or proxy)
+  }
   if (!res.ok || !payload.ok) {
     throw new Error(payload.error || `HTTP ${res.status}`);
   }

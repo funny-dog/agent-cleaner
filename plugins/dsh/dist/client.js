@@ -365,9 +365,17 @@ function formatBytes(bytes) {
 async function apiJson(url, init) {
   const res = await fetch(url, {
     ...init,
+    credentials: init?.credentials ?? "same-origin",
     headers: { "content-type": "application/json", ...init?.headers ?? {} }
   });
-  const payload = await res.json();
+  let payload = {};
+  try {
+    const parsed = await res.json();
+    if (parsed && typeof parsed === "object") {
+      payload = parsed;
+    }
+  } catch {
+  }
   if (!res.ok || !payload.ok) {
     throw new Error(payload.error || `HTTP ${res.status}`);
   }
