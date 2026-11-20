@@ -23,7 +23,7 @@ function readPluginVersion() {
     catch {
         // ignore and fallback
     }
-    return '0.2.2';
+    return '0.2.3';
 }
 export const PLUGIN_VERSION = readPluginVersion();
 export const name = 'agent-cleaner';
@@ -287,6 +287,13 @@ function registerHttpRoutes(ctx, config, defaultHours) {
             typeof connection.requestRejection !== 'function') {
             return;
         }
+        let overviewCache = null;
+        let overviewEpoch = 0;
+        const inFlightOverview = new Map();
+        const invalidateOverviewCache = () => {
+            overviewEpoch += 1;
+            overviewCache = null;
+        };
         const mount = () => {
             const route = (routePath, method, fn) => webServer.register({
                 kind: 'exact',
@@ -347,15 +354,47 @@ function registerHttpRoutes(ctx, config, defaultHours) {
                     const hours = Number(url.searchParams.get('hours') ?? defaultHours);
                     const safeHours = Number.isFinite(hours) && hours >= 0 ? Math.floor(hours) : defaultHours;
                     const lang = url.searchParams.get('lang') === 'en' ? 'en' : 'zh';
-                    await ensureBinaryPath(config);
-                    const [agents, doctors, mcpAudit, trash] = await Promise.all([
-                        runCliJson(config, ['scan', '--older-than', `${safeHours}h`, '--lang', lang]),
-                        runCliJson(config, ['doctor']),
-                        runCliJson(config, ['mcp']),
-                        runCliJson(config, ['restore']),
-                    ]);
-                    return { agents, doctors, mcpAudit, trash, exemptHours: safeHours, lang };
+                    const force = url.searchParams.get('force') === '1';
+                    const key = `${safeHours}:${lang}`;
+                    if (!force && overviewCache?.key === key) {
+                        return overviewCache.data;
+                    }
+                    if (!force) {
+                        const pending = inFlightOverview.get(key);
+                        if (pending)
+                            return pending;
+                    }
+                    const epoch = overviewEpoch;
+                    const job = (async () => {
+                        await ensureBinaryPath(config);
+                        const [agents, doctors, mcpAudit, trash] = await Promise.all([
+                            runCliJson(config, ['scan', '--older-than', `${safeHours}h`, '--lang', lang]),
+                            runCliJson(config, ['doctor']),
+                            runCliJson(config, ['mcp']),
+                            runCliJson(config, ['restore']),
+                        ]);
+                        const payload = {
+                            agents,
+                            doctors,
+                            mcpAudit,
+                            trash,
+                            exemptHours: safeHours,
+                            lang,
+                            scannedAt: Date.now(),
+                        };
+                        if (overviewEpoch === epoch) {
+                            overviewCache = { key, data: payload };
+                        }
+                        return payload;
+                    })().finally(() => {
+                        if (inFlightOverview.get(key) === job) {
+                            inFlightOverview.delete(key);
+                        }
+                    });
+                    inFlightOverview.set(key, job);
+                    return job;
                 }),
+                route('/agent-cleaner/api/trash', 'GET', () => runCliJson(config, ['restore'])),
                 route('/agent-cleaner/api/clean', 'POST', async (body) => {
                     const hours = typeof body.exemptHours === 'number' && body.exemptHours >= 0
                         ? Math.floor(body.exemptHours)
@@ -366,31 +405,46 @@ function registerHttpRoutes(ctx, config, defaultHours) {
                         args.push('--only-recommended');
                     if (body.dryRun)
                         args.push('--dry-run');
+                    if (body.permanent)
+                        args.push('--permanent');
                     if (Array.isArray(body.selectedIds) && body.selectedIds.length > 0) {
                         args.push('--ids', body.selectedIds.map(String).join(','));
                     }
-                    return runCliJson(config, args);
+                    const result = await runCliJson(config, args);
+                    if (!body.dryRun)
+                        invalidateOverviewCache();
+                    return result;
                 }),
-                route('/agent-cleaner/api/doctor-fix', 'POST', () => runCliJson(config, ['doctor', '--fix'])),
-                route('/agent-cleaner/api/mcp-kill', 'POST', (body) => {
-                    if (typeof body.pid === 'number' && Number.isInteger(body.pid) && body.pid > 0) {
-                        return runCliJson(config, ['mcp', '--kill', '--pid', String(body.pid)]);
-                    }
-                    return runCliJson(config, ['mcp', '--kill']);
+                route('/agent-cleaner/api/doctor-fix', 'POST', async () => {
+                    const result = await runCliJson(config, ['doctor', '--fix']);
+                    invalidateOverviewCache();
+                    return result;
                 }),
-                route('/agent-cleaner/api/restore', 'POST', (body) => {
+                route('/agent-cleaner/api/mcp-kill', 'POST', async (body) => {
+                    const result = typeof body.pid === 'number' && Number.isInteger(body.pid) && body.pid > 0
+                        ? await runCliJson(config, ['mcp', '--kill', '--pid', String(body.pid)])
+                        : await runCliJson(config, ['mcp', '--kill']);
+                    invalidateOverviewCache();
+                    return result;
+                }),
+                route('/agent-cleaner/api/restore', 'POST', async (body) => {
                     if (typeof body.batchId !== 'string' || !body.batchId) {
                         throw new Error('batchId is required');
                     }
-                    return runCliJson(config, ['restore', body.batchId]);
+                    const result = await runCliJson(config, ['restore', body.batchId]);
+                    invalidateOverviewCache();
+                    return result;
                 }),
-                route('/agent-cleaner/api/purge', 'POST', (body) => {
-                    if (body.all)
-                        return runCliJson(config, ['restore', '--purge-all']);
-                    if (typeof body.batchId === 'string' && body.batchId) {
-                        return runCliJson(config, ['restore', '--purge', body.batchId]);
-                    }
-                    throw new Error('batchId or all=true is required');
+                route('/agent-cleaner/api/purge', 'POST', async (body) => {
+                    const result = body.all
+                        ? await runCliJson(config, ['restore', '--purge-all'])
+                        : typeof body.batchId === 'string' && body.batchId
+                            ? await runCliJson(config, ['restore', '--purge', body.batchId])
+                            : (() => {
+                                throw new Error('batchId or all=true is required');
+                            })();
+                    invalidateOverviewCache();
+                    return result;
                 }),
             ];
         };

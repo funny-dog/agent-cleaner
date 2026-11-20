@@ -41,6 +41,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .manage(commands::OverviewCache::default())
         .invoke_handler(builder.invoke_handler())
         .setup(|app| {
             tray::setup_tray(app.handle())?;

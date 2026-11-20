@@ -142,6 +142,7 @@ fn call_tool(ctx: &CleanerContext, name: &str, args: &Value) -> Result<Value, St
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
                 lang: Some(Language::En),
+                permanent: false,
             };
             let report = scanner::clean(ctx, &opts).map_err(|e| e.to_string())?;
             serde_json::to_value(report).map_err(|e| e.to_string())

@@ -428,19 +428,55 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
       });
       assert.equal(await getExecCount(), 1);
 
+      const rCleanPermanent = await fetch(`${baseUrl}/agent-cleaner/api/clean`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ exemptHours: 24, lang: 'zh', permanent: true, selectedIds: ['id1'] }),
+      });
+      assert.equal(rCleanPermanent.status, 200);
+      assert.deepEqual(await rCleanPermanent.json(), {
+        ok: true,
+        data: {
+          argv: ['clean', '--yes', '--older-than', '24h', '--lang', 'zh', '--permanent', '--ids', 'id1', '--json'],
+        },
+      });
+      assert.equal(await getExecCount(), 2);
+
       const rOverview = await fetch(`${baseUrl}/agent-cleaner/api/overview?hours=48&lang=en`, {
         method: 'GET',
       });
       assert.equal(rOverview.status, 200);
       const ovJson = (await rOverview.json()) as {
         ok: boolean;
-        data: { exemptHours: number; lang: string; agents: { argv: string[] } };
+        data: { exemptHours: number; lang: string; scannedAt?: number; agents: { argv: string[] } };
       };
       assert.equal(ovJson.ok, true);
       assert.equal(ovJson.data.exemptHours, 48);
       assert.equal(ovJson.data.lang, 'en');
+      assert.equal(typeof ovJson.data.scannedAt, 'number');
       assert.deepEqual(ovJson.data.agents.argv, ['scan', '--older-than', '48h', '--lang', 'en', '--json']);
-      assert.equal(await getExecCount(), 5);
+      assert.equal(await getExecCount(), 6);
+
+      // Second identical overview request hits cache (no CLI execution)
+      const rOverviewCached = await fetch(`${baseUrl}/agent-cleaner/api/overview?hours=48&lang=en`, {
+        method: 'GET',
+      });
+      assert.equal(rOverviewCached.status, 200);
+      assert.equal(await getExecCount(), 6);
+
+      // force=1 bypasses cache (+4 CLI executions)
+      const rOverviewForced = await fetch(
+        `${baseUrl}/agent-cleaner/api/overview?hours=48&lang=en&force=1`,
+        { method: 'GET' },
+      );
+      assert.equal(rOverviewForced.status, 200);
+      assert.equal(await getExecCount(), 10);
+
+      // Lightweight /api/trash only invokes `restore --json` (+1 CLI execution)
+      const rTrash = await fetch(`${baseUrl}/agent-cleaner/api/trash`, { method: 'GET' });
+      assert.equal(rTrash.status, 200);
+      assert.deepEqual(await rTrash.json(), { ok: true, data: { argv: ['restore', '--json'] } });
+      assert.equal(await getExecCount(), 11);
 
       const rKillOne = await fetch(`${baseUrl}/agent-cleaner/api/mcp-kill`, {
         method: 'POST',
@@ -452,7 +488,7 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
         ok: true,
         data: { argv: ['mcp', '--kill', '--pid', '9999', '--json'] },
       });
-      assert.equal(await getExecCount(), 6);
+      assert.equal(await getExecCount(), 12);
     },
   );
 });

@@ -22,14 +22,17 @@ export function TrayView() {
 
   const t = DICT[lang];
 
-  const load = async (curLang = lang) => {
+  const load = async (curLang = lang, force = false) => {
     setLoading(true);
     try {
-      const res = await commands.getOverview({
-        exemptHours: 24,
-        agentFilter: null,
-        lang: curLang,
-      });
+      const res = await commands.getOverview(
+        {
+          exemptHours: 24,
+          agentFilter: null,
+          lang: curLang,
+        },
+        force,
+      );
       if (res.status === 'ok') setOverview(res.data);
       else setNotice(res.error);
     } finally {
@@ -38,14 +41,16 @@ export function TrayView() {
   };
 
   useEffect(() => {
-    void load(lang);
+    void load(lang, false);
     const unlisten = listen<OverviewReport>('cleaner://overview-updated', (e) => {
       setOverview(e.payload);
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [lang]);
+    // Mount-only: reuse cached overview across language switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleLanguage = () => {
     const next: Lang = lang === 'zh' ? 'en' : 'zh';
@@ -135,7 +140,7 @@ export function TrayView() {
               <span>{lang === 'zh' ? 'EN' : '中'}</span>
             </button>
             <button
-              onClick={() => void load(lang)}
+              onClick={() => void load(lang, true)}
               disabled={loading || busy}
               aria-label={t.rescan}
               className="cursor-pointer rounded-lg border border-slate-800/80 bg-slate-900/80 p-1.5 text-slate-400 transition-colors duration-200 hover:border-slate-700 hover:text-slate-100 focus-visible:outline-2 focus-visible:outline-cyan-500 disabled:opacity-50"

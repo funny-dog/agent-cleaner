@@ -125,6 +125,7 @@ fn test_dsh_undeclared_modules_and_clean_restore_roundtrip() {
             selected_ids: None,
             only_recommended: true,
             lang: Some(Language::En),
+            permanent: false,
         },
     )
     .unwrap();
@@ -897,4 +898,47 @@ command = "/nonexistent/codex_mcp_xyz"
     assert!(fixed_zed.contains("// Zed comment"));
     assert!(fixed_zed.contains("alive_zed"));
     assert!(!fixed_zed.contains("dead_zed"));
+}
+
+#[test]
+fn test_permanent_clean_bypasses_trash() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    let log_dir = home.join(".claude/debug");
+    fs::create_dir_all(&log_dir).unwrap();
+    let log_file = log_dir.join("old.log");
+    fs::write(&log_file, "old debug log").unwrap();
+
+    let ctx = old_ctx(home);
+    let results = scan_all(
+        &ctx,
+        &ScanOptions {
+            exempt_hours: Some(24),
+            agent_filter: Some(vec!["claude".to_string()]),
+            lang: Some(Language::En),
+        },
+    );
+    let item_id = results[0].items[0].id.clone();
+
+    let report = clean(
+        &ctx,
+        &CleanOptions {
+            exempt_hours: Some(24),
+            dry_run: false,
+            agent_filter: None,
+            selected_ids: Some(vec![item_id]),
+            only_recommended: false,
+            lang: Some(Language::En),
+            permanent: true,
+        },
+    )
+    .unwrap();
+
+    assert!(report.batch_id.is_none());
+    assert_eq!(report.cleaned_count, 1);
+    assert!(report.freed_bytes > 0);
+    assert!(report.errors.is_empty());
+    assert!(!log_dir.exists() && !log_file.exists());
+    assert!(list_batches(&ctx).is_empty());
 }

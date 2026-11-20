@@ -10,16 +10,19 @@ export function formatBytes(bytes: number | null | undefined): string {
   return idx === 0 ? `${bytes} B` : `${val.toFixed(1)} ${units[idx]}`;
 }
 
-export function formatTimeAgo(ms: number | null | undefined): string {
+export function formatTimeAgo(
+  ms: number | null | undefined,
+  lang: 'zh' | 'en' = 'zh',
+): string {
   if (!ms) return '--';
   const diff = Math.max(0, Date.now() - ms);
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return '刚刚';
-  if (mins < 60) return `${mins} 分钟前`;
+  if (mins < 1) return lang === 'zh' ? '刚刚' : 'just now';
+  if (mins < 60) return lang === 'zh' ? `${mins} 分钟前` : `${mins}m ago`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} 小时前`;
+  if (hours < 24) return lang === 'zh' ? `${hours} 小时前` : `${hours}h ago`;
   const days = Math.floor(hours / 24);
-  return `${days} 天前`;
+  return lang === 'zh' ? `${days} 天前` : `${days}d ago`;
 }
 
 const AGENT_LABELS: Record<string, string> = {

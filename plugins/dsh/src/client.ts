@@ -95,6 +95,7 @@ interface OverviewPayload {
   };
   trash: TrashBatch[];
   exemptHours: number;
+  scannedAt?: number;
 }
 
 const DICT = {
@@ -108,6 +109,7 @@ const DICT = {
     d7: '7 天',
     rescan: '刷新扫描',
     scanning: '扫描中...',
+    lastScanned: (s: string) => `上次扫描：${s}`,
     scanningTitle: '正在扫描 AI Agent 环境...',
     rescanningTitle: '正在重新扫描环境...',
     scanningSubtitle: '正在检测各工具磁盘缓存、MCP 僵尸进程与配置文件',
@@ -131,6 +133,12 @@ const DICT = {
     selectedPrefix: '已勾选 ',
     selectedMid: ' 项，合计可释放 ',
     deleteSelected: (s: string) => `删除所选到回收站 (${s})`,
+    deletePermanently: '彻底删除',
+    confirmPermanentTitle: '确认彻底删除',
+    confirmPermanentDesc: (n: number, s: string) =>
+      `确定要彻底删除所选的 ${n} 项（共 ${s}）吗？此操作不会进入回收站，删除后无法恢复。`,
+    cancel: '取消',
+    confirmDelete: '确认彻底删除',
     badgeRec: '推荐清理',
     badgeOpt: '建议复核',
     badgeExempt: '活跃豁免',
@@ -157,6 +165,7 @@ const DICT = {
     purge: '永久删除',
     trashEmpty: '回收站为空',
     labelClean: '清理',
+    labelPermanentDelete: '彻底删除',
     labelMcpKill: '查杀孤儿 MCP',
     labelDoctorFix: '保注释自愈',
     labelRestore: '原路还原',
@@ -172,6 +181,7 @@ const DICT = {
     d7: '7 Days',
     rescan: 'Rescan',
     scanning: 'Scanning...',
+    lastScanned: (s: string) => `Scanned ${s}`,
     scanningTitle: 'Scanning AI Agent Environments...',
     rescanningTitle: 'Rescanning Environments...',
     scanningSubtitle: 'Inspecting disk caches, orphan MCP processes, and config files',
@@ -195,6 +205,12 @@ const DICT = {
     selectedPrefix: 'Selected ',
     selectedMid: ' item(s), reclaimable ',
     deleteSelected: (s: string) => `Move Selected to Trash (${s})`,
+    deletePermanently: 'Delete Permanently',
+    confirmPermanentTitle: 'Confirm Permanent Deletion',
+    confirmPermanentDesc: (n: number, s: string) =>
+      `Permanently delete ${n} selected item(s) (${s})? This bypasses the trash and cannot be undone.`,
+    cancel: 'Cancel',
+    confirmDelete: 'Delete Permanently',
     badgeRec: 'Recommended',
     badgeOpt: 'Optional',
     badgeExempt: 'Active Guard',
@@ -221,6 +237,7 @@ const DICT = {
     purge: 'Purge',
     trashEmpty: 'Trash is empty',
     labelClean: 'Clean',
+    labelPermanentDelete: 'Permanent Delete',
     labelMcpKill: 'Kill Orphan MCP',
     labelDoctorFix: 'Config Auto-Heal',
     labelRestore: 'Restore Batch',
@@ -264,6 +281,7 @@ const SCOPED_CSS = `
   --ac-danger-text: var(--dsw-alias-state-error-primary, #dc2626);
   --ac-danger-bg: rgba(220, 38, 38, 0.09);
   --ac-danger-border: rgba(220, 38, 38, 0.35);
+  --ac-danger-solid-bg: #dc2626;
   --ac-info-text: #1d4ed8;
   --ac-info-bg: rgba(37, 99, 235, 0.12);
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #475569);
@@ -307,6 +325,7 @@ body[data-ds-dark-theme] .ac-dsh-root {
   --ac-danger-text: var(--dsw-alias-state-error-primary, #fb7185);
   --ac-danger-bg: rgba(244, 63, 94, 0.12);
   --ac-danger-border: rgba(244, 63, 94, 0.45);
+  --ac-danger-solid-bg: #e11d48;
   --ac-info-text: #93c5fd;
   --ac-info-bg: rgba(59, 130, 246, 0.16);
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
@@ -344,6 +363,7 @@ body[data-ds-dark-theme] .ac-dsh-root {
     --ac-danger-text: var(--dsw-alias-state-error-primary, #fb7185);
     --ac-danger-bg: rgba(244, 63, 94, 0.12);
     --ac-danger-border: rgba(244, 63, 94, 0.45);
+    --ac-danger-solid-bg: #e11d48;
     --ac-info-text: #93c5fd;
     --ac-info-bg: rgba(59, 130, 246, 0.16);
     --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
@@ -425,6 +445,38 @@ body[data-ds-dark-theme] .ac-dsh-root {
 }
 .ac-btn-ghost:hover:not(:disabled) {
   border-color: var(--ac-border-strong); background: var(--ac-hover-bg);
+}
+.ac-btn-danger {
+  padding: 7px 13px; border: 1px solid var(--ac-danger-border);
+  background: var(--ac-danger-bg); color: var(--ac-danger-text); font-weight: 600;
+}
+.ac-btn-danger:hover:not(:disabled) { filter: brightness(1.06); }
+.ac-btn-danger-solid {
+  padding: 7px 14px; border: none; font-weight: 600;
+  background: var(--ac-danger-solid-bg); color: #ffffff;
+}
+.ac-btn-danger-solid:hover:not(:disabled) { filter: brightness(1.08); }
+.ac-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--ac-overlay-bg);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.ac-modal-card {
+  max-width: 420px;
+  width: 100%;
+  padding: 20px 22px;
+  border-radius: 14px;
+  border: 1px solid var(--ac-danger-border);
+  background: var(--ac-overlay-card);
+  box-shadow: var(--ac-overlay-shadow);
+  -webkit-app-region: no-drag;
 }
 .ac-input, .ac-select {
   border: 1px solid var(--ac-border);
@@ -649,6 +701,11 @@ const ICONS = {
     { d: 'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z' },
   ],
   close: [{ d: 'M18 6 6 18' }, { d: 'm6 6 12 12' }],
+  alert: [
+    { d: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z' },
+    { d: 'M12 9v4' },
+    { d: 'M12 17h.01' },
+  ],
 };
 
 function recBadge(rec: Recommendation, t: (typeof DICT)[Lang]) {
@@ -694,51 +751,79 @@ function recBadge(rec: Recommendation, t: (typeof DICT)[Lang]) {
   );
 }
 
+let cachedPanelState: {
+  data: OverviewPayload;
+  scannedAt: number;
+  exemptHours: number;
+  selectedIds: Set<string>;
+} | null = null;
+
 function CleanerPanel() {
   const [lang, setLang] = useState<Lang>(readStoredLang);
-  const [data, setData] = useState<OverviewPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<OverviewPayload | null>(cachedPanelState?.data ?? null);
+  const [scannedAt, setScannedAt] = useState<number | null>(cachedPanelState?.scannedAt ?? null);
+  const [, setTimeTick] = useState(0);
+  const [loading, setLoading] = useState(!cachedPanelState);
   const [busy, setBusy] = useState(false);
+  const [confirmPermanent, setConfirmPermanent] = useState(false);
   const [tab, setTab] = useState<'scan' | 'mcp' | 'doctor' | 'trash'>('scan');
   const [recFilter, setRecFilter] = useState<'all' | Recommendation>('all');
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [exemptHours, setExemptHours] = useState<number>(24);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [exemptHours, setExemptHours] = useState<number>(cachedPanelState?.exemptHours ?? 24);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => cachedPanelState?.selectedIds ?? new Set(),
+  );
   const [expandedBatchIds, setExpandedBatchIds] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
 
   const t = DICT[lang];
 
+  useEffect(() => {
+    if (data && scannedAt !== null) {
+      cachedPanelState = { data, scannedAt, exemptHours, selectedIds };
+    }
+  }, [data, scannedAt, exemptHours, selectedIds]);
+
   const load = useCallback(
-    async (hours = exemptHours, curLang = lang, preserveSelection = false) => {
+    async (hours = exemptHours, curLang = lang, preserveSelection = false, force = false) => {
       setLoading(true);
       try {
         const ov = await apiJson<OverviewPayload>(
-          `/agent-cleaner/api/overview?hours=${hours}&lang=${curLang}`,
+          `/agent-cleaner/api/overview?hours=${hours}&lang=${curLang}${force ? '&force=1' : ''}`,
         );
-        setData(ov);
+        const now = typeof ov.scannedAt === 'number' ? ov.scannedAt : Date.now();
+        let nextSel = selectedIds;
         if (!preserveSelection) {
-          const next = new Set<string>();
+          nextSel = new Set<string>();
           for (const ag of ov.agents) {
             for (const it of ag.items) {
-              if (it.recommendation === 'recommended') next.add(it.id);
+              if (it.recommendation === 'recommended') nextSel.add(it.id);
             }
           }
-          setSelectedIds(next);
+          setSelectedIds(nextSel);
         }
+        setData(ov);
+        setScannedAt(now);
+        cachedPanelState = { data: ov, scannedAt: now, exemptHours: hours, selectedIds: nextSel };
       } catch (err) {
         setNotice({ kind: 'error', text: err instanceof Error ? err.message : String(err) });
       } finally {
         setLoading(false);
       }
     },
-    [exemptHours, lang],
+    [exemptHours, lang, selectedIds],
   );
 
   useEffect(() => {
-    void load(exemptHours, lang, false);
-  }, [exemptHours, lang, load]);
+    if (!cachedPanelState) {
+      void load(exemptHours, lang, false, false);
+    }
+    const timer = window.setInterval(() => setTimeTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(timer);
+    // Mount-only: avoid rescanning on language switches or tab remounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleLanguage = () => {
     const next: Lang = lang === 'zh' ? 'en' : 'zh';
@@ -793,11 +878,84 @@ function CleanerPanel() {
     });
   };
 
+  const refreshTrashOnly = async (fallbackBatch?: TrashBatch) => {
+    try {
+      const trash = await apiJson<TrashBatch[]>('/agent-cleaner/api/trash');
+      setData((prev) => (prev ? { ...prev, trash } : prev));
+    } catch {
+      if (fallbackBatch) {
+        setData((prev) => (prev ? { ...prev, trash: [fallbackBatch, ...prev.trash] } : prev));
+      }
+    }
+  };
+
+  const applyCleanLocally = (res: any, reqSelectedIds?: string[]): ScanItem[] => {
+    const errs: string[] = Array.isArray(res?.errors) ? res.errors.map(String) : [];
+    const itemsList: ScanItem[] = Array.isArray(res?.items) ? res.items : [];
+    const succeededIds = new Set<string>();
+    const succeededItems: ScanItem[] = [];
+
+    if (itemsList.length > 0) {
+      for (const it of itemsList) {
+        const failed = errs.some((err) => err === it.path || err.startsWith(`${it.path}:`));
+        if (!failed) {
+          succeededIds.add(it.id);
+          succeededItems.push(it);
+        }
+      }
+    } else if (errs.length === 0 && Array.isArray(reqSelectedIds)) {
+      for (const id of reqSelectedIds) succeededIds.add(id);
+    }
+
+    if (succeededIds.size === 0) return succeededItems;
+
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        agents: prev.agents.map((ag) => {
+          let removedBytes = 0;
+          const remaining = ag.items.filter((it) => {
+            if (succeededIds.has(it.id)) {
+              removedBytes += it.sizeBytes || 0;
+              return false;
+            }
+            return true;
+          });
+          if (remaining.length === ag.items.length) return ag;
+          return {
+            ...ag,
+            items: remaining,
+            totalBytes: Math.max(0, (ag.totalBytes || 0) - removedBytes),
+            diskUsageBytes: Math.max(0, (ag.diskUsageBytes || 0) - removedBytes),
+          };
+        }),
+      };
+    });
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of succeededIds) next.delete(id);
+      return next;
+    });
+    return succeededItems;
+  };
+
   const runAction = async (label: string, url: string, body: unknown = {}) => {
     setBusy(true);
     setNotice(null);
     try {
       const res = await apiJson<any>(url, { method: 'POST', body: JSON.stringify(body) });
+      const bodyObj = (body && typeof body === 'object' ? body : {}) as Record<string, any>;
+      const isPermanentReq = Boolean(bodyObj.permanent);
+      // Fallback when host process still runs cached index.js without --permanent support:
+      // immediately purge the just-created trash batch so permanent deletion still takes effect.
+      if (isPermanentReq && typeof res?.batchId === 'string' && res.batchId) {
+        await apiJson('/agent-cleaner/api/purge', {
+          method: 'POST',
+          body: JSON.stringify({ batchId: res.batchId }),
+        });
+        res.batchId = null;
+      }
       if (res?.batchId && typeof res?.restored === 'number') {
         const failCount = Array.isArray(res.failed) ? res.failed.length : 0;
         setNotice({
@@ -807,8 +965,12 @@ function CleanerPanel() {
               ? `原路还原完成（批次 ${String(res.batchId).slice(0, 8)}）：成功 ${res.restored} 项${failCount > 0 ? `，失败 ${failCount} 项 (${res.failed[0]})` : ''}`
               : `Restore complete (${String(res.batchId).slice(0, 8)}): restored ${res.restored} item(s)${failCount > 0 ? `, ${failCount} failed (${res.failed[0]})` : ''}`,
         });
-        await load(exemptHours, lang, false);
+        if (res.restored > 0) {
+          await load(exemptHours, lang, false, true);
+        }
       } else if (res?.batchId) {
+        const reqIds = Array.isArray(bodyObj.selectedIds) ? bodyObj.selectedIds.map(String) : undefined;
+        const removed = applyCleanLocally(res, reqIds);
         setNotice({
           kind: 'info',
           text:
@@ -816,9 +978,37 @@ function CleanerPanel() {
               ? `${label}成功：已移入回收站 ${res.cleanedCount ?? 0} 项（释放 ${formatBytes(res.freedBytes ?? 0)}），还原批次：${res.batchId}`
               : `${label} succeeded: moved ${res.cleanedCount ?? 0} item(s) (${formatBytes(res.freedBytes ?? 0)}), batchId: ${res.batchId}`,
         });
-        await load(exemptHours, lang, false);
+        await refreshTrashOnly({
+          batchId: res.batchId,
+          timestamp: Date.now(),
+          totalBytes: res.freedBytes ?? 0,
+          items: removed.map((it) => ({
+            id: it.id,
+            agent: it.agent,
+            originalPath: it.path,
+            sizeBytes: it.sizeBytes,
+          })),
+        });
+      } else if (typeof res?.cleanedCount === 'number') {
+        const errs = Array.isArray(res.errors) ? res.errors : [];
+        const hasErr = errs.length > 0;
+        const reqIds = Array.isArray(bodyObj.selectedIds) ? bodyObj.selectedIds.map(String) : undefined;
+        applyCleanLocally(res, reqIds);
+        setNotice({
+          kind: hasErr && res.cleanedCount === 0 ? 'error' : 'info',
+          text: isPermanentReq
+            ? lang === 'zh'
+              ? `已彻底删除 ${res.cleanedCount} 项（释放 ${formatBytes(res.freedBytes ?? 0)}）${hasErr ? `（${errs.length} 项失败：${errs[0]}）` : ''}`
+              : `Permanently deleted ${res.cleanedCount} item(s) (${formatBytes(res.freedBytes ?? 0)})${hasErr ? ` (${errs.length} failed: ${errs[0]})` : ''}`
+            : lang === 'zh'
+              ? `${label}完成：已处理 ${res.cleanedCount} 项（释放 ${formatBytes(res.freedBytes ?? 0)}）${hasErr ? `（${errs.length} 项失败：${errs[0]}）` : ''}`
+              : `${label} complete: processed ${res.cleanedCount} item(s) (${formatBytes(res.freedBytes ?? 0)})${hasErr ? ` (${errs.length} failed: ${errs[0]})` : ''}`,
+        });
       } else if (typeof res?.fixedCount === 'number') {
         const backups = Array.isArray(res.backupPaths) ? res.backupPaths.length : 0;
+        if (Array.isArray(res.reports)) {
+          setData((prev) => (prev ? { ...prev, doctors: res.reports } : prev));
+        }
         setNotice({
           kind: 'info',
           text:
@@ -826,19 +1016,37 @@ function CleanerPanel() {
               ? `配置自愈完成：共修复 ${res.fixedCount} 个问题，已自动备份 ${backups} 份原配置`
               : `Config heal complete: fixed ${res.fixedCount} issue(s), backed up ${backups} file(s)`,
         });
-        await load(exemptHours, lang, false);
       } else if (Array.isArray(res?.killResults)) {
         const total = res.killResults.length;
-        const okCount = res.killResults.filter((k: any) => k?.success).length;
+        const killedPids = new Set<number>(
+          res.killResults.filter((k: any) => k?.success && typeof k.pid === 'number').map((k: any) => k.pid),
+        );
+        if (killedPids.size > 0) {
+          setData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              mcpAudit: {
+                ...prev.mcpAudit,
+                audit: {
+                  ...prev.mcpAudit.audit,
+                  orphanProcesses: prev.mcpAudit.audit.orphanProcesses.filter(
+                    (p) => !killedPids.has(p.pid),
+                  ),
+                },
+              },
+            };
+          });
+        }
         setNotice({
-          kind: total > 0 && okCount === 0 ? 'error' : 'info',
+          kind: total > 0 && killedPids.size === 0 ? 'error' : 'info',
           text:
             lang === 'zh'
-              ? `孤儿 MCP 查杀完成：已终止 ${okCount} / ${total} 个进程`
-              : `Orphan MCP cleanup: terminated ${okCount} / ${total} process(es)`,
+              ? `孤儿 MCP 查杀完成：已终止 ${killedPids.size} / ${total} 个进程`
+              : `Orphan MCP cleanup: terminated ${killedPids.size} / ${total} process(es)`,
         });
-        await load(exemptHours, lang, false);
       } else if (typeof res?.purgedBatches === 'number') {
+        setData((prev) => (prev ? { ...prev, trash: [] } : prev));
         setNotice({
           kind: 'info',
           text:
@@ -846,19 +1054,20 @@ function CleanerPanel() {
               ? `已永久清空全部 ${res.purgedBatches} 个回收站批次`
               : `Permanently purged all ${res.purgedBatches} trash batch(es)`,
         });
-        await load(exemptHours, lang, false);
       } else if (typeof res?.purged === 'string') {
+        const purgedId = res.purged;
+        setData((prev) =>
+          prev ? { ...prev, trash: prev.trash.filter((b) => b.batchId !== purgedId) } : prev,
+        );
         setNotice({
           kind: 'info',
           text:
             lang === 'zh'
-              ? `已永久删除回收站批次 ${res.purged.slice(0, 8)}`
-              : `Permanently purged trash batch ${res.purged.slice(0, 8)}`,
+              ? `已永久删除回收站批次 ${purgedId.slice(0, 8)}`
+              : `Permanently purged trash batch ${purgedId.slice(0, 8)}`,
         });
-        await load(exemptHours, lang, false);
       } else {
         setNotice({ kind: 'info', text: `${label}: OK` });
-        await load(exemptHours, lang, false);
       }
     } catch (err) {
       setNotice({
@@ -964,7 +1173,11 @@ function CleanerPanel() {
                 className: 'ac-select',
                 value: exemptHours,
                 disabled: loading || busy,
-                onChange: (e: any) => setExemptHours(Number(e.target.value)),
+                onChange: (e: any) => {
+                  const h = Number(e.target.value);
+                  setExemptHours(h);
+                  void load(h, lang, false, true);
+                },
               },
               React.createElement('option', { value: 0 }, t.guardOff),
               React.createElement('option', { value: 12 }, t.h12),
@@ -973,12 +1186,24 @@ function CleanerPanel() {
               React.createElement('option', { value: 168 }, t.d7),
             ),
           ),
+          scannedAt !== null &&
+            React.createElement(
+              'span',
+              {
+                style: {
+                  fontSize: 11,
+                  color: 'var(--ac-text-muted)',
+                  whiteSpace: 'nowrap',
+                },
+              },
+              t.lastScanned(formatTimeAgo(scannedAt, lang)),
+            ),
           React.createElement(
             'button',
             {
               className: 'ac-btn ac-btn-ghost',
               disabled: loading || busy,
-              onClick: () => void load(exemptHours, lang, false),
+              onClick: () => void load(exemptHours, lang, false, true),
             },
             React.createElement(SvgIcon, {
               size: 14,
@@ -1405,20 +1630,34 @@ function CleanerPanel() {
               ),
             ),
             React.createElement(
-              'button',
-              {
-                className: 'ac-btn ac-btn-primary',
-                disabled: busy || selectedItems.length === 0,
-                onClick: () =>
-                  void runAction(t.labelClean, '/agent-cleaner/api/clean', {
-                    exemptHours,
-                    lang,
-                    dryRun: false,
-                    selectedIds: selectedItems.map((i) => i.id),
-                  }),
-              },
-              React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
-              t.deleteSelected(formatBytes(selectedBytes)),
+              'div',
+              { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
+              React.createElement(
+                'button',
+                {
+                  className: 'ac-btn ac-btn-primary',
+                  disabled: busy || selectedItems.length === 0,
+                  onClick: () =>
+                    void runAction(t.labelClean, '/agent-cleaner/api/clean', {
+                      exemptHours,
+                      lang,
+                      dryRun: false,
+                      selectedIds: selectedItems.map((i) => i.id),
+                    }),
+                },
+                React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+                t.deleteSelected(formatBytes(selectedBytes)),
+              ),
+              React.createElement(
+                'button',
+                {
+                  className: 'ac-btn ac-btn-danger',
+                  disabled: busy || selectedItems.length === 0,
+                  onClick: () => setConfirmPermanent(true),
+                },
+                React.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+                t.deletePermanently,
+              ),
             ),
           ),
 
@@ -2011,6 +2250,108 @@ function CleanerPanel() {
         ),
       ),
     ),
+    confirmPermanent &&
+      React.createElement(
+        'div',
+        {
+          className: 'ac-modal-overlay',
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-labelledby': 'ac-confirm-permanent-title',
+          onClick: () => setConfirmPermanent(false),
+        },
+        React.createElement(
+          'div',
+          {
+            className: 'ac-modal-card',
+            onClick: (e: any) => e.stopPropagation(),
+          },
+          React.createElement(
+            'div',
+            { style: { display: 'flex', alignItems: 'flex-start', gap: 12 } },
+            React.createElement(
+              'div',
+              {
+                style: {
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  background: 'var(--ac-danger-bg)',
+                  color: 'var(--ac-danger-text)',
+                  border: '1px solid var(--ac-danger-border)',
+                },
+              },
+              React.createElement(SvgIcon, { size: 18, paths: ICONS.alert }),
+            ),
+            React.createElement(
+              'div',
+              { style: { flex: 1, minWidth: 0 } },
+              React.createElement(
+                'div',
+                {
+                  id: 'ac-confirm-permanent-title',
+                  style: { fontSize: 14, fontWeight: 600, color: 'var(--ac-text-primary)' },
+                },
+                t.confirmPermanentTitle,
+              ),
+              React.createElement(
+                'div',
+                {
+                  style: {
+                    marginTop: 6,
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    color: 'var(--ac-text-secondary)',
+                  },
+                },
+                t.confirmPermanentDesc(selectedItems.length, formatBytes(selectedBytes)),
+              ),
+            ),
+          ),
+          React.createElement(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 8,
+                marginTop: 18,
+              },
+            },
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'ac-btn ac-btn-ghost',
+                onClick: () => setConfirmPermanent(false),
+              },
+              t.cancel,
+            ),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'ac-btn ac-btn-danger-solid',
+                onClick: () => {
+                  setConfirmPermanent(false);
+                  void runAction(t.labelPermanentDelete, '/agent-cleaner/api/clean', {
+                    exemptHours,
+                    lang,
+                    dryRun: false,
+                    permanent: true,
+                    selectedIds: selectedItems.map((i) => i.id),
+                  });
+                },
+              },
+              t.confirmDelete,
+            ),
+          ),
+        ),
+      ),
   );
 }
 

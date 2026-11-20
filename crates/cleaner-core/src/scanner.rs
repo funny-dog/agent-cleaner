@@ -127,6 +127,31 @@ pub fn clean(ctx: &CleanerContext, options: &CleanOptions) -> Result<CleanReport
         });
     }
 
+    if options.permanent {
+        let mut cleaned_count = 0usize;
+        let mut actual_freed_bytes = 0u64;
+        let mut errors = Vec::new();
+        for item in &candidates {
+            match crate::fs_safe::remove_path(std::path::Path::new(&item.path)) {
+                Ok(()) => {
+                    cleaned_count += 1;
+                    actual_freed_bytes += item.size_bytes;
+                }
+                Err(err) => {
+                    errors.push(format!("{}: {err}", item.path));
+                }
+            }
+        }
+        return Ok(CleanReport {
+            batch_id: None,
+            dry_run: false,
+            cleaned_count,
+            freed_bytes: actual_freed_bytes,
+            items: candidates,
+            errors,
+        });
+    }
+
     let batch_id = trash::begin_batch(ctx)?;
     let (manifest, errors) = trash::move_to_trash(ctx, &batch_id, &candidates)?;
 

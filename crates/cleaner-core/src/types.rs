@@ -153,6 +153,8 @@ pub struct CleanOptions {
     pub only_recommended: bool,
     #[serde(default)]
     pub lang: Option<Language>,
+    #[serde(default)]
+    pub permanent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

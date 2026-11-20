@@ -50,17 +50,24 @@ export function DashboardView() {
   const [exemptHours, setExemptHours] = useState<number>(24);
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
+  const [confirmPermanent, setConfirmPermanent] = useState<boolean>(false);
+  const [, setTimeTick] = useState<number>(0);
   const [banner, setBanner] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(
     null,
   );
 
   const t = DICT[lang];
 
-  const refreshAll = async (hours = exemptHours, curLang = lang, preserveSelection = false) => {
+  const refreshAll = async (
+    hours = exemptHours,
+    curLang = lang,
+    preserveSelection = false,
+    force = false,
+  ) => {
     setLoading(true);
     try {
       const [ovRes, trRes] = await Promise.all([
-        commands.getOverview({ exemptHours: hours, agentFilter: null, lang: curLang }),
+        commands.getOverview({ exemptHours: hours, agentFilter: null, lang: curLang }, force),
         commands.listTrash(),
       ]);
 
@@ -90,14 +97,18 @@ export function DashboardView() {
   };
 
   useEffect(() => {
-    void refreshAll(exemptHours, lang, false);
+    void refreshAll(exemptHours, lang, false, false);
+    const timer = window.setInterval(() => setTimeTick((n) => n + 1), 60_000);
     const unlisten = listen<OverviewReport>('cleaner://overview-updated', (e) => {
       setOverview(e.payload);
     });
     return () => {
+      window.clearInterval(timer);
       void unlisten.then((fn) => fn());
     };
-  }, [lang]);
+    // Mount-only: avoid rescanning when toggling display language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleLanguage = () => {
     const next: Lang = lang === 'zh' ? 'en' : 'zh';
@@ -149,7 +160,7 @@ export function DashboardView() {
     });
   };
 
-  const handleClean = async () => {
+  const handleClean = async (permanent = false) => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     setBusy(true);
@@ -162,16 +173,83 @@ export function DashboardView() {
         selectedIds: ids,
         onlyRecommended: false,
         lang,
+        permanent,
       });
       if (res.status === 'ok') {
+        const errs = res.data.errors;
+        const hasErr = errs.length > 0;
+        const succeededIds = new Set<string>();
+        for (const it of res.data.items) {
+          const failed = errs.some((e) => e === it.path || e.startsWith(`${it.path}:`));
+          if (!failed) succeededIds.add(it.id);
+        }
+
+        let nextTrashCount: number | null = null;
+        if (!permanent && res.data.batchId) {
+          const trRes = await commands.listTrash();
+          if (trRes.status === 'ok') {
+            setTrashBatches(trRes.data);
+            nextTrashCount = trRes.data.length;
+          }
+        }
+
+        if (succeededIds.size > 0) {
+          setOverview((prev) => {
+            if (!prev) return prev;
+            const nextAgents = prev.agents.map((ag) => {
+              let removedBytes = 0;
+              const remaining = ag.items.filter((it) => {
+                if (succeededIds.has(it.id)) {
+                  removedBytes += it.sizeBytes ?? 0;
+                  return false;
+                }
+                return true;
+              });
+              if (remaining.length === ag.items.length) return ag;
+              return {
+                ...ag,
+                items: remaining,
+                totalBytes: Math.max(0, (ag.totalBytes ?? 0) - removedBytes),
+                diskUsageBytes: Math.max(0, (ag.diskUsageBytes ?? 0) - removedBytes),
+              };
+            });
+            const totalDiskUsageBytes = nextAgents.reduce((s, a) => s + (a.diskUsageBytes ?? 0), 0);
+            const totalReclaimableBytes = nextAgents.reduce((s, a) => s + (a.totalBytes ?? 0), 0);
+            const recommendedBytes = nextAgents
+              .flatMap((a) => a.items)
+              .filter((i) => i.recommendation === 'recommended')
+              .reduce((s, i) => s + (i.sizeBytes ?? 0), 0);
+            return {
+              ...prev,
+              agents: nextAgents,
+              summary: {
+                ...prev.summary,
+                totalDiskUsageBytes,
+                totalReclaimableBytes,
+                recommendedBytes,
+                trashBatchCount:
+                  nextTrashCount ??
+                  (prev.summary.trashBatchCount + (!permanent && res.data.batchId ? 1 : 0)),
+              },
+            };
+          });
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of succeededIds) next.delete(id);
+            return next;
+          });
+        }
+
         setBanner({
-          kind: 'success',
-          text:
-            lang === 'zh'
+          kind: hasErr && res.data.cleanedCount === 0 ? 'error' : hasErr ? 'info' : 'success',
+          text: permanent
+            ? lang === 'zh'
+              ? `已彻底删除 ${res.data.cleanedCount} 项（释放 ${formatBytes(res.data.freedBytes)}）${hasErr ? `（${errs.length} 项失败：${errs[0]}）` : ''}`
+              : `Permanently deleted ${res.data.cleanedCount} item(s) (${formatBytes(res.data.freedBytes)})${hasErr ? ` (${errs.length} failed: ${errs[0]})` : ''}`
+            : lang === 'zh'
               ? `已移入回收站 ${res.data.cleanedCount} 项（释放 ${formatBytes(res.data.freedBytes)}），回滚批次：${res.data.batchId ?? 'N/A'}`
               : `Moved ${res.data.cleanedCount} item(s) to trash (${formatBytes(res.data.freedBytes)}), batchId: ${res.data.batchId ?? 'N/A'}`,
         });
-        await refreshAll();
       } else {
         setBanner({ kind: 'error', text: res.error });
       }
@@ -185,6 +263,17 @@ export function DashboardView() {
     try {
       const res = await commands.fixDoctors();
       if (res.status === 'ok') {
+        const reports = res.data.reports;
+        const issueCount = reports.reduce((s, d) => s + d.issues.length, 0);
+        setOverview((prev) =>
+          prev
+            ? {
+                ...prev,
+                doctors: reports,
+                summary: { ...prev.summary, doctorIssueCount: issueCount },
+              }
+            : prev,
+        );
         setBanner({
           kind: 'success',
           text:
@@ -192,7 +281,6 @@ export function DashboardView() {
               ? `配置修复完成：共修复 ${res.data.fixedCount} 个问题，已自动备份 ${res.data.backupPaths.length} 份原配置`
               : `Config heal complete: fixed ${res.data.fixedCount} issue(s), backed up ${res.data.backupPaths.length} file(s)`,
         });
-        await refreshAll();
       } else {
         setBanner({ kind: 'error', text: res.error });
       }
@@ -206,6 +294,17 @@ export function DashboardView() {
     try {
       const res = await commands.killOrphanMcp(pid);
       if (res.status === 'ok') {
+        if (res.data.success) {
+          setOverview((prev) => {
+            if (!prev) return prev;
+            const remaining = prev.mcp.orphanProcesses.filter((p) => p.pid !== pid);
+            return {
+              ...prev,
+              mcp: { ...prev.mcp, orphanProcesses: remaining },
+              summary: { ...prev.summary, orphanMcpCount: remaining.length },
+            };
+          });
+        }
         setBanner({
           kind: res.data.success ? 'success' : 'error',
           text:
@@ -213,7 +312,6 @@ export function DashboardView() {
               ? `进程 PID ${pid} 处理结果：${res.data.method} (${res.data.success ? '已终止' : '仍存活'})`
               : `PID ${pid}: ${res.data.method} (${res.data.success ? 'terminated' : 'still alive'})`,
         });
-        await refreshAll();
       } else {
         setBanner({ kind: 'error', text: res.error });
       }
@@ -236,7 +334,12 @@ export function DashboardView() {
                 }`
               : `Restored ${res.data.restored} item(s) from ${batchId.slice(0, 8)}`,
         });
-        await refreshAll();
+        if (res.data.restored > 0) {
+          await refreshAll(exemptHours, lang, false, true);
+        } else {
+          const trRes = await commands.listTrash();
+          if (trRes.status === 'ok') setTrashBatches(trRes.data);
+        }
       } else {
         setBanner({ kind: 'error', text: res.error });
       }
@@ -250,6 +353,13 @@ export function DashboardView() {
     try {
       const res = await commands.purgeTrashBatch(batchId);
       if (res.status === 'ok') {
+        setTrashBatches((prev) => {
+          const next = prev.filter((b) => b.batchId !== batchId);
+          setOverview((ov) =>
+            ov ? { ...ov, summary: { ...ov.summary, trashBatchCount: next.length } } : ov,
+          );
+          return next;
+        });
         setBanner({
           kind: 'info',
           text:
@@ -257,7 +367,6 @@ export function DashboardView() {
               ? `已永久清除批次 ${batchId.slice(0, 8)}`
               : `Purged batch ${batchId.slice(0, 8)}`,
         });
-        await refreshAll();
       }
     } finally {
       setBusy(false);
@@ -269,6 +378,10 @@ export function DashboardView() {
     try {
       const res = await commands.purgeAllTrash();
       if (res.status === 'ok') {
+        setTrashBatches([]);
+        setOverview((ov) =>
+          ov ? { ...ov, summary: { ...ov.summary, trashBatchCount: 0 } } : ov,
+        );
         setBanner({
           kind: 'info',
           text:
@@ -276,7 +389,6 @@ export function DashboardView() {
               ? `已清空全部 ${res.data} 个回收站批次`
               : `Purged all ${res.data} trash batch(es)`,
         });
-        await refreshAll();
       }
     } finally {
       setBusy(false);
@@ -336,7 +448,7 @@ export function DashboardView() {
               onChange={(e) => {
                 const h = Number(e.target.value);
                 setExemptHours(h);
-                void refreshAll(h, lang, false);
+                void refreshAll(h, lang, false, true);
               }}
               className="cursor-pointer bg-transparent font-medium text-cyan-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -348,8 +460,14 @@ export function DashboardView() {
             </select>
           </label>
 
+          {summary?.scannedAt && (
+            <span className="text-[11px] whitespace-nowrap text-slate-400">
+              {t.lastScanned(formatTimeAgo(summary.scannedAt, lang))}
+            </span>
+          )}
+
           <button
-            onClick={() => void refreshAll(exemptHours, lang, false)}
+            onClick={() => void refreshAll(exemptHours, lang, false, true)}
             disabled={loading || busy}
             className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-800 bg-[#0b1120] px-3.5 py-1.5 text-xs font-medium text-slate-200 transition-colors duration-200 hover:border-slate-700 hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -633,7 +751,7 @@ export function DashboardView() {
                   {t.clearSel}
                 </button>
                 <button
-                  onClick={() => void handleClean()}
+                  onClick={() => void handleClean(false)}
                   disabled={busy || selectedIds.size === 0}
                   className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-cyan-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-cyan-400 focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -641,6 +759,14 @@ export function DashboardView() {
                   <span className="tabular-nums">
                     {t.moveToTrash(selectedIds.size, formatBytes(selectedBytes))}
                   </span>
+                </button>
+                <button
+                  onClick={() => setConfirmPermanent(true)}
+                  disabled={busy || selectedIds.size === 0}
+                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/15 px-3.5 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25 focus-visible:outline-2 focus-visible:outline-rose-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{t.deletePermanently}</span>
                 </button>
               </div>
             </div>
@@ -896,7 +1022,7 @@ export function DashboardView() {
                         {batch.batchId.slice(0, 8)}
                       </span>
                       <span className="text-xs font-normal text-slate-400 tabular-nums">
-                        · {formatTimeAgo(batch.timestamp)} · {batch.items.length} ·{' '}
+                        · {formatTimeAgo(batch.timestamp, lang)} · {batch.items.length} ·{' '}
                         {formatBytes(batch.totalBytes)}
                       </span>
                     </div>
@@ -937,6 +1063,57 @@ export function DashboardView() {
         )}
       </main>
       </div>
+
+      {confirmPermanent && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-permanent-title"
+          onClick={() => setConfirmPermanent(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#060a13]/75 px-4 backdrop-blur-xs"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-rose-500/35 bg-[#0b1120] p-6 shadow-2xl shadow-rose-950/30"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/30">
+                <ShieldAlert className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2
+                  id="confirm-permanent-title"
+                  className="text-sm font-semibold text-slate-100"
+                >
+                  {t.confirmPermanentTitle}
+                </h2>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+                  {t.confirmPermanentDesc(selectedIds.size, formatBytes(selectedBytes))}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setConfirmPermanent(false)}
+                className="cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-3.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-slate-500"
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmPermanent(false);
+                  void handleClean(true);
+                }}
+                className="cursor-pointer rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-500 focus-visible:outline-2 focus-visible:outline-rose-400"
+              >
+                {t.confirmDelete}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

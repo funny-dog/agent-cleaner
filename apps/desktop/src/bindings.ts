@@ -5,7 +5,7 @@ import type { InvokeOptions } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	getOverview: (options: ScanOptions_Deserialize | null, _options?: InvokeOptions) => typedError<OverviewReport_Serialize, string>(__TAURI_INVOKE("get_overview", { options }, _options)),
+	getOverview: (options: ScanOptions_Deserialize | null, force: boolean | null, _options?: InvokeOptions) => typedError<OverviewReport_Serialize, string>(__TAURI_INVOKE("get_overview", { options, force }, _options)),
 	scan: (options: ScanOptions_Deserialize | null, _options?: InvokeOptions) => typedError<ScanResult[], string>(__TAURI_INVOKE("scan", { options }, _options)),
 	clean: (options: CleanOptions_Deserialize, _options?: InvokeOptions) => typedError<CleanReport_Serialize, string>(__TAURI_INVOKE("clean", { options }, _options)),
 	listTrash: (options?: InvokeOptions) => typedError<TrashManifest[], string>(__TAURI_INVOKE("list_trash", undefined, options)),
@@ -30,6 +30,7 @@ export type CleanOptions_Deserialize = {
 	selectedIds?: string[] | null,
 	onlyRecommended: boolean,
 	lang?: Language | null,
+	permanent?: boolean,
 };
 
 export type CleanOptions_Serialize = {
@@ -39,6 +40,7 @@ export type CleanOptions_Serialize = {
 	selectedIds: string[] | null,
 	onlyRecommended: boolean,
 	lang: Language | null,
+	permanent: boolean,
 };
 
 export type CleanRecommendation = "recommended" | "optional" | "exempt";

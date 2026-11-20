@@ -67,6 +67,7 @@ var DICT = {
     d7: "7 \u5929",
     rescan: "\u5237\u65B0\u626B\u63CF",
     scanning: "\u626B\u63CF\u4E2D...",
+    lastScanned: (s) => `\u4E0A\u6B21\u626B\u63CF\uFF1A${s}`,
     scanningTitle: "\u6B63\u5728\u626B\u63CF AI Agent \u73AF\u5883...",
     rescanningTitle: "\u6B63\u5728\u91CD\u65B0\u626B\u63CF\u73AF\u5883...",
     scanningSubtitle: "\u6B63\u5728\u68C0\u6D4B\u5404\u5DE5\u5177\u78C1\u76D8\u7F13\u5B58\u3001MCP \u50F5\u5C38\u8FDB\u7A0B\u4E0E\u914D\u7F6E\u6587\u4EF6",
@@ -90,6 +91,11 @@ var DICT = {
     selectedPrefix: "\u5DF2\u52FE\u9009 ",
     selectedMid: " \u9879\uFF0C\u5408\u8BA1\u53EF\u91CA\u653E ",
     deleteSelected: (s) => `\u5220\u9664\u6240\u9009\u5230\u56DE\u6536\u7AD9 (${s})`,
+    deletePermanently: "\u5F7B\u5E95\u5220\u9664",
+    confirmPermanentTitle: "\u786E\u8BA4\u5F7B\u5E95\u5220\u9664",
+    confirmPermanentDesc: (n, s) => `\u786E\u5B9A\u8981\u5F7B\u5E95\u5220\u9664\u6240\u9009\u7684 ${n} \u9879\uFF08\u5171 ${s}\uFF09\u5417\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u4F1A\u8FDB\u5165\u56DE\u6536\u7AD9\uFF0C\u5220\u9664\u540E\u65E0\u6CD5\u6062\u590D\u3002`,
+    cancel: "\u53D6\u6D88",
+    confirmDelete: "\u786E\u8BA4\u5F7B\u5E95\u5220\u9664",
     badgeRec: "\u63A8\u8350\u6E05\u7406",
     badgeOpt: "\u5EFA\u8BAE\u590D\u6838",
     badgeExempt: "\u6D3B\u8DC3\u8C41\u514D",
@@ -116,6 +122,7 @@ var DICT = {
     purge: "\u6C38\u4E45\u5220\u9664",
     trashEmpty: "\u56DE\u6536\u7AD9\u4E3A\u7A7A",
     labelClean: "\u6E05\u7406",
+    labelPermanentDelete: "\u5F7B\u5E95\u5220\u9664",
     labelMcpKill: "\u67E5\u6740\u5B64\u513F MCP",
     labelDoctorFix: "\u4FDD\u6CE8\u91CA\u81EA\u6108",
     labelRestore: "\u539F\u8DEF\u8FD8\u539F",
@@ -131,6 +138,7 @@ var DICT = {
     d7: "7 Days",
     rescan: "Rescan",
     scanning: "Scanning...",
+    lastScanned: (s) => `Scanned ${s}`,
     scanningTitle: "Scanning AI Agent Environments...",
     rescanningTitle: "Rescanning Environments...",
     scanningSubtitle: "Inspecting disk caches, orphan MCP processes, and config files",
@@ -154,6 +162,11 @@ var DICT = {
     selectedPrefix: "Selected ",
     selectedMid: " item(s), reclaimable ",
     deleteSelected: (s) => `Move Selected to Trash (${s})`,
+    deletePermanently: "Delete Permanently",
+    confirmPermanentTitle: "Confirm Permanent Deletion",
+    confirmPermanentDesc: (n, s) => `Permanently delete ${n} selected item(s) (${s})? This bypasses the trash and cannot be undone.`,
+    cancel: "Cancel",
+    confirmDelete: "Delete Permanently",
     badgeRec: "Recommended",
     badgeOpt: "Optional",
     badgeExempt: "Active Guard",
@@ -180,6 +193,7 @@ var DICT = {
     purge: "Purge",
     trashEmpty: "Trash is empty",
     labelClean: "Clean",
+    labelPermanentDelete: "Permanent Delete",
     labelMcpKill: "Kill Orphan MCP",
     labelDoctorFix: "Config Auto-Heal",
     labelRestore: "Restore Batch",
@@ -221,6 +235,7 @@ var SCOPED_CSS = `
   --ac-danger-text: var(--dsw-alias-state-error-primary, #dc2626);
   --ac-danger-bg: rgba(220, 38, 38, 0.09);
   --ac-danger-border: rgba(220, 38, 38, 0.35);
+  --ac-danger-solid-bg: #dc2626;
   --ac-info-text: #1d4ed8;
   --ac-info-bg: rgba(37, 99, 235, 0.12);
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #475569);
@@ -264,6 +279,7 @@ body[data-ds-dark-theme] .ac-dsh-root {
   --ac-danger-text: var(--dsw-alias-state-error-primary, #fb7185);
   --ac-danger-bg: rgba(244, 63, 94, 0.12);
   --ac-danger-border: rgba(244, 63, 94, 0.45);
+  --ac-danger-solid-bg: #e11d48;
   --ac-info-text: #93c5fd;
   --ac-info-bg: rgba(59, 130, 246, 0.16);
   --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
@@ -301,6 +317,7 @@ body[data-ds-dark-theme] .ac-dsh-root {
     --ac-danger-text: var(--dsw-alias-state-error-primary, #fb7185);
     --ac-danger-bg: rgba(244, 63, 94, 0.12);
     --ac-danger-border: rgba(244, 63, 94, 0.45);
+    --ac-danger-solid-bg: #e11d48;
     --ac-info-text: #93c5fd;
     --ac-info-bg: rgba(59, 130, 246, 0.16);
     --ac-exempt-text: var(--dsw-alias-label-tertiary, #94a3b8);
@@ -382,6 +399,38 @@ body[data-ds-dark-theme] .ac-dsh-root {
 }
 .ac-btn-ghost:hover:not(:disabled) {
   border-color: var(--ac-border-strong); background: var(--ac-hover-bg);
+}
+.ac-btn-danger {
+  padding: 7px 13px; border: 1px solid var(--ac-danger-border);
+  background: var(--ac-danger-bg); color: var(--ac-danger-text); font-weight: 600;
+}
+.ac-btn-danger:hover:not(:disabled) { filter: brightness(1.06); }
+.ac-btn-danger-solid {
+  padding: 7px 14px; border: none; font-weight: 600;
+  background: var(--ac-danger-solid-bg); color: #ffffff;
+}
+.ac-btn-danger-solid:hover:not(:disabled) { filter: brightness(1.08); }
+.ac-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--ac-overlay-bg);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.ac-modal-card {
+  max-width: 420px;
+  width: 100%;
+  padding: 20px 22px;
+  border-radius: 14px;
+  border: 1px solid var(--ac-danger-border);
+  background: var(--ac-overlay-card);
+  box-shadow: var(--ac-overlay-shadow);
+  -webkit-app-region: no-drag;
 }
 .ac-input, .ac-select {
   border: 1px solid var(--ac-border);
@@ -593,7 +642,12 @@ var ICONS = {
     { d: "M2 12h20" },
     { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
   ],
-  close: [{ d: "M18 6 6 18" }, { d: "m6 6 12 12" }]
+  close: [{ d: "M18 6 6 18" }, { d: "m6 6 12 12" }],
+  alert: [
+    { d: "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" },
+    { d: "M12 9v4" },
+    { d: "M12 17h.01" }
+  ]
 };
 function recBadge(rec, t) {
   if (rec === "recommended") {
@@ -637,48 +691,67 @@ function recBadge(rec, t) {
     t.badgeExempt
   );
 }
+var cachedPanelState = null;
 function CleanerPanel() {
   const [lang, setLang] = (0, import_react.useState)(readStoredLang);
-  const [data, setData] = (0, import_react.useState)(null);
-  const [loading, setLoading] = (0, import_react.useState)(true);
+  const [data, setData] = (0, import_react.useState)(cachedPanelState?.data ?? null);
+  const [scannedAt, setScannedAt] = (0, import_react.useState)(cachedPanelState?.scannedAt ?? null);
+  const [, setTimeTick] = (0, import_react.useState)(0);
+  const [loading, setLoading] = (0, import_react.useState)(!cachedPanelState);
   const [busy, setBusy] = (0, import_react.useState)(false);
+  const [confirmPermanent, setConfirmPermanent] = (0, import_react.useState)(false);
   const [tab, setTab] = (0, import_react.useState)("scan");
   const [recFilter, setRecFilter] = (0, import_react.useState)("all");
   const [agentFilter, setAgentFilter] = (0, import_react.useState)("all");
   const [searchQuery, setSearchQuery] = (0, import_react.useState)("");
-  const [exemptHours, setExemptHours] = (0, import_react.useState)(24);
-  const [selectedIds, setSelectedIds] = (0, import_react.useState)(/* @__PURE__ */ new Set());
+  const [exemptHours, setExemptHours] = (0, import_react.useState)(cachedPanelState?.exemptHours ?? 24);
+  const [selectedIds, setSelectedIds] = (0, import_react.useState)(
+    () => cachedPanelState?.selectedIds ?? /* @__PURE__ */ new Set()
+  );
   const [expandedBatchIds, setExpandedBatchIds] = (0, import_react.useState)(/* @__PURE__ */ new Set());
   const [notice, setNotice] = (0, import_react.useState)(null);
   const t = DICT[lang];
+  (0, import_react.useEffect)(() => {
+    if (data && scannedAt !== null) {
+      cachedPanelState = { data, scannedAt, exemptHours, selectedIds };
+    }
+  }, [data, scannedAt, exemptHours, selectedIds]);
   const load = (0, import_react.useCallback)(
-    async (hours = exemptHours, curLang = lang, preserveSelection = false) => {
+    async (hours = exemptHours, curLang = lang, preserveSelection = false, force = false) => {
       setLoading(true);
       try {
         const ov = await apiJson(
-          `/agent-cleaner/api/overview?hours=${hours}&lang=${curLang}`
+          `/agent-cleaner/api/overview?hours=${hours}&lang=${curLang}${force ? "&force=1" : ""}`
         );
-        setData(ov);
+        const now = typeof ov.scannedAt === "number" ? ov.scannedAt : Date.now();
+        let nextSel = selectedIds;
         if (!preserveSelection) {
-          const next = /* @__PURE__ */ new Set();
+          nextSel = /* @__PURE__ */ new Set();
           for (const ag of ov.agents) {
             for (const it of ag.items) {
-              if (it.recommendation === "recommended") next.add(it.id);
+              if (it.recommendation === "recommended") nextSel.add(it.id);
             }
           }
-          setSelectedIds(next);
+          setSelectedIds(nextSel);
         }
+        setData(ov);
+        setScannedAt(now);
+        cachedPanelState = { data: ov, scannedAt: now, exemptHours: hours, selectedIds: nextSel };
       } catch (err) {
         setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
       } finally {
         setLoading(false);
       }
     },
-    [exemptHours, lang]
+    [exemptHours, lang, selectedIds]
   );
   (0, import_react.useEffect)(() => {
-    void load(exemptHours, lang, false);
-  }, [exemptHours, lang, load]);
+    if (!cachedPanelState) {
+      void load(exemptHours, lang, false, false);
+    }
+    const timer = window.setInterval(() => setTimeTick((n) => n + 1), 6e4);
+    return () => window.clearInterval(timer);
+  }, []);
   const toggleLanguage = () => {
     const next = lang === "zh" ? "en" : "zh";
     writeStoredLang(next);
@@ -717,54 +790,165 @@ function CleanerPanel() {
       return next;
     });
   };
+  const refreshTrashOnly = async (fallbackBatch) => {
+    try {
+      const trash = await apiJson("/agent-cleaner/api/trash");
+      setData((prev) => prev ? { ...prev, trash } : prev);
+    } catch {
+      if (fallbackBatch) {
+        setData((prev) => prev ? { ...prev, trash: [fallbackBatch, ...prev.trash] } : prev);
+      }
+    }
+  };
+  const applyCleanLocally = (res, reqSelectedIds) => {
+    const errs = Array.isArray(res?.errors) ? res.errors.map(String) : [];
+    const itemsList = Array.isArray(res?.items) ? res.items : [];
+    const succeededIds = /* @__PURE__ */ new Set();
+    const succeededItems = [];
+    if (itemsList.length > 0) {
+      for (const it of itemsList) {
+        const failed = errs.some((err) => err === it.path || err.startsWith(`${it.path}:`));
+        if (!failed) {
+          succeededIds.add(it.id);
+          succeededItems.push(it);
+        }
+      }
+    } else if (errs.length === 0 && Array.isArray(reqSelectedIds)) {
+      for (const id of reqSelectedIds) succeededIds.add(id);
+    }
+    if (succeededIds.size === 0) return succeededItems;
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        agents: prev.agents.map((ag) => {
+          let removedBytes = 0;
+          const remaining = ag.items.filter((it) => {
+            if (succeededIds.has(it.id)) {
+              removedBytes += it.sizeBytes || 0;
+              return false;
+            }
+            return true;
+          });
+          if (remaining.length === ag.items.length) return ag;
+          return {
+            ...ag,
+            items: remaining,
+            totalBytes: Math.max(0, (ag.totalBytes || 0) - removedBytes),
+            diskUsageBytes: Math.max(0, (ag.diskUsageBytes || 0) - removedBytes)
+          };
+        })
+      };
+    });
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of succeededIds) next.delete(id);
+      return next;
+    });
+    return succeededItems;
+  };
   const runAction = async (label, url, body = {}) => {
     setBusy(true);
     setNotice(null);
     try {
       const res = await apiJson(url, { method: "POST", body: JSON.stringify(body) });
+      const bodyObj = body && typeof body === "object" ? body : {};
+      const isPermanentReq = Boolean(bodyObj.permanent);
+      if (isPermanentReq && typeof res?.batchId === "string" && res.batchId) {
+        await apiJson("/agent-cleaner/api/purge", {
+          method: "POST",
+          body: JSON.stringify({ batchId: res.batchId })
+        });
+        res.batchId = null;
+      }
       if (res?.batchId && typeof res?.restored === "number") {
         const failCount = Array.isArray(res.failed) ? res.failed.length : 0;
         setNotice({
           kind: failCount > 0 && res.restored === 0 ? "error" : "info",
           text: lang === "zh" ? `\u539F\u8DEF\u8FD8\u539F\u5B8C\u6210\uFF08\u6279\u6B21 ${String(res.batchId).slice(0, 8)}\uFF09\uFF1A\u6210\u529F ${res.restored} \u9879${failCount > 0 ? `\uFF0C\u5931\u8D25 ${failCount} \u9879 (${res.failed[0]})` : ""}` : `Restore complete (${String(res.batchId).slice(0, 8)}): restored ${res.restored} item(s)${failCount > 0 ? `, ${failCount} failed (${res.failed[0]})` : ""}`
         });
-        await load(exemptHours, lang, false);
+        if (res.restored > 0) {
+          await load(exemptHours, lang, false, true);
+        }
       } else if (res?.batchId) {
+        const reqIds = Array.isArray(bodyObj.selectedIds) ? bodyObj.selectedIds.map(String) : void 0;
+        const removed = applyCleanLocally(res, reqIds);
         setNotice({
           kind: "info",
           text: lang === "zh" ? `${label}\u6210\u529F\uFF1A\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9 ${res.cleanedCount ?? 0} \u9879\uFF08\u91CA\u653E ${formatBytes(res.freedBytes ?? 0)}\uFF09\uFF0C\u8FD8\u539F\u6279\u6B21\uFF1A${res.batchId}` : `${label} succeeded: moved ${res.cleanedCount ?? 0} item(s) (${formatBytes(res.freedBytes ?? 0)}), batchId: ${res.batchId}`
         });
-        await load(exemptHours, lang, false);
+        await refreshTrashOnly({
+          batchId: res.batchId,
+          timestamp: Date.now(),
+          totalBytes: res.freedBytes ?? 0,
+          items: removed.map((it) => ({
+            id: it.id,
+            agent: it.agent,
+            originalPath: it.path,
+            sizeBytes: it.sizeBytes
+          }))
+        });
+      } else if (typeof res?.cleanedCount === "number") {
+        const errs = Array.isArray(res.errors) ? res.errors : [];
+        const hasErr = errs.length > 0;
+        const reqIds = Array.isArray(bodyObj.selectedIds) ? bodyObj.selectedIds.map(String) : void 0;
+        applyCleanLocally(res, reqIds);
+        setNotice({
+          kind: hasErr && res.cleanedCount === 0 ? "error" : "info",
+          text: isPermanentReq ? lang === "zh" ? `\u5DF2\u5F7B\u5E95\u5220\u9664 ${res.cleanedCount} \u9879\uFF08\u91CA\u653E ${formatBytes(res.freedBytes ?? 0)}\uFF09${hasErr ? `\uFF08${errs.length} \u9879\u5931\u8D25\uFF1A${errs[0]}\uFF09` : ""}` : `Permanently deleted ${res.cleanedCount} item(s) (${formatBytes(res.freedBytes ?? 0)})${hasErr ? ` (${errs.length} failed: ${errs[0]})` : ""}` : lang === "zh" ? `${label}\u5B8C\u6210\uFF1A\u5DF2\u5904\u7406 ${res.cleanedCount} \u9879\uFF08\u91CA\u653E ${formatBytes(res.freedBytes ?? 0)}\uFF09${hasErr ? `\uFF08${errs.length} \u9879\u5931\u8D25\uFF1A${errs[0]}\uFF09` : ""}` : `${label} complete: processed ${res.cleanedCount} item(s) (${formatBytes(res.freedBytes ?? 0)})${hasErr ? ` (${errs.length} failed: ${errs[0]})` : ""}`
+        });
       } else if (typeof res?.fixedCount === "number") {
         const backups = Array.isArray(res.backupPaths) ? res.backupPaths.length : 0;
+        if (Array.isArray(res.reports)) {
+          setData((prev) => prev ? { ...prev, doctors: res.reports } : prev);
+        }
         setNotice({
           kind: "info",
           text: lang === "zh" ? `\u914D\u7F6E\u81EA\u6108\u5B8C\u6210\uFF1A\u5171\u4FEE\u590D ${res.fixedCount} \u4E2A\u95EE\u9898\uFF0C\u5DF2\u81EA\u52A8\u5907\u4EFD ${backups} \u4EFD\u539F\u914D\u7F6E` : `Config heal complete: fixed ${res.fixedCount} issue(s), backed up ${backups} file(s)`
         });
-        await load(exemptHours, lang, false);
       } else if (Array.isArray(res?.killResults)) {
         const total = res.killResults.length;
-        const okCount = res.killResults.filter((k) => k?.success).length;
+        const killedPids = new Set(
+          res.killResults.filter((k) => k?.success && typeof k.pid === "number").map((k) => k.pid)
+        );
+        if (killedPids.size > 0) {
+          setData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              mcpAudit: {
+                ...prev.mcpAudit,
+                audit: {
+                  ...prev.mcpAudit.audit,
+                  orphanProcesses: prev.mcpAudit.audit.orphanProcesses.filter(
+                    (p) => !killedPids.has(p.pid)
+                  )
+                }
+              }
+            };
+          });
+        }
         setNotice({
-          kind: total > 0 && okCount === 0 ? "error" : "info",
-          text: lang === "zh" ? `\u5B64\u513F MCP \u67E5\u6740\u5B8C\u6210\uFF1A\u5DF2\u7EC8\u6B62 ${okCount} / ${total} \u4E2A\u8FDB\u7A0B` : `Orphan MCP cleanup: terminated ${okCount} / ${total} process(es)`
+          kind: total > 0 && killedPids.size === 0 ? "error" : "info",
+          text: lang === "zh" ? `\u5B64\u513F MCP \u67E5\u6740\u5B8C\u6210\uFF1A\u5DF2\u7EC8\u6B62 ${killedPids.size} / ${total} \u4E2A\u8FDB\u7A0B` : `Orphan MCP cleanup: terminated ${killedPids.size} / ${total} process(es)`
         });
-        await load(exemptHours, lang, false);
       } else if (typeof res?.purgedBatches === "number") {
+        setData((prev) => prev ? { ...prev, trash: [] } : prev);
         setNotice({
           kind: "info",
           text: lang === "zh" ? `\u5DF2\u6C38\u4E45\u6E05\u7A7A\u5168\u90E8 ${res.purgedBatches} \u4E2A\u56DE\u6536\u7AD9\u6279\u6B21` : `Permanently purged all ${res.purgedBatches} trash batch(es)`
         });
-        await load(exemptHours, lang, false);
       } else if (typeof res?.purged === "string") {
+        const purgedId = res.purged;
+        setData(
+          (prev) => prev ? { ...prev, trash: prev.trash.filter((b) => b.batchId !== purgedId) } : prev
+        );
         setNotice({
           kind: "info",
-          text: lang === "zh" ? `\u5DF2\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u6279\u6B21 ${res.purged.slice(0, 8)}` : `Permanently purged trash batch ${res.purged.slice(0, 8)}`
+          text: lang === "zh" ? `\u5DF2\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u6279\u6B21 ${purgedId.slice(0, 8)}` : `Permanently purged trash batch ${purgedId.slice(0, 8)}`
         });
-        await load(exemptHours, lang, false);
       } else {
         setNotice({ kind: "info", text: `${label}: OK` });
-        await load(exemptHours, lang, false);
       }
     } catch (err) {
       setNotice({
@@ -861,7 +1045,11 @@ function CleanerPanel() {
                 className: "ac-select",
                 value: exemptHours,
                 disabled: loading || busy,
-                onChange: (e) => setExemptHours(Number(e.target.value))
+                onChange: (e) => {
+                  const h = Number(e.target.value);
+                  setExemptHours(h);
+                  void load(h, lang, false, true);
+                }
               },
               import_react.default.createElement("option", { value: 0 }, t.guardOff),
               import_react.default.createElement("option", { value: 12 }, t.h12),
@@ -870,12 +1058,23 @@ function CleanerPanel() {
               import_react.default.createElement("option", { value: 168 }, t.d7)
             )
           ),
+          scannedAt !== null && import_react.default.createElement(
+            "span",
+            {
+              style: {
+                fontSize: 11,
+                color: "var(--ac-text-muted)",
+                whiteSpace: "nowrap"
+              }
+            },
+            t.lastScanned(formatTimeAgo(scannedAt, lang))
+          ),
           import_react.default.createElement(
             "button",
             {
               className: "ac-btn ac-btn-ghost",
               disabled: loading || busy,
-              onClick: () => void load(exemptHours, lang, false)
+              onClick: () => void load(exemptHours, lang, false, true)
             },
             import_react.default.createElement(SvgIcon, {
               size: 14,
@@ -1273,19 +1472,33 @@ function CleanerPanel() {
               )
             ),
             import_react.default.createElement(
-              "button",
-              {
-                className: "ac-btn ac-btn-primary",
-                disabled: busy || selectedItems.length === 0,
-                onClick: () => void runAction(t.labelClean, "/agent-cleaner/api/clean", {
-                  exemptHours,
-                  lang,
-                  dryRun: false,
-                  selectedIds: selectedItems.map((i) => i.id)
-                })
-              },
-              import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
-              t.deleteSelected(formatBytes(selectedBytes))
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" } },
+              import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-primary",
+                  disabled: busy || selectedItems.length === 0,
+                  onClick: () => void runAction(t.labelClean, "/agent-cleaner/api/clean", {
+                    exemptHours,
+                    lang,
+                    dryRun: false,
+                    selectedIds: selectedItems.map((i) => i.id)
+                  })
+                },
+                import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+                t.deleteSelected(formatBytes(selectedBytes))
+              ),
+              import_react.default.createElement(
+                "button",
+                {
+                  className: "ac-btn ac-btn-danger",
+                  disabled: busy || selectedItems.length === 0,
+                  onClick: () => setConfirmPermanent(true)
+                },
+                import_react.default.createElement(SvgIcon, { size: 13, paths: ICONS.trash }),
+                t.deletePermanently
+              )
             )
           ),
           // Item List
@@ -1839,6 +2052,107 @@ function CleanerPanel() {
             "div",
             { className: "ac-card", style: { fontSize: 12, color: "var(--ac-text-muted)" } },
             t.trashEmpty
+          )
+        )
+      )
+    ),
+    confirmPermanent && import_react.default.createElement(
+      "div",
+      {
+        className: "ac-modal-overlay",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-labelledby": "ac-confirm-permanent-title",
+        onClick: () => setConfirmPermanent(false)
+      },
+      import_react.default.createElement(
+        "div",
+        {
+          className: "ac-modal-card",
+          onClick: (e) => e.stopPropagation()
+        },
+        import_react.default.createElement(
+          "div",
+          { style: { display: "flex", alignItems: "flex-start", gap: 12 } },
+          import_react.default.createElement(
+            "div",
+            {
+              style: {
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                background: "var(--ac-danger-bg)",
+                color: "var(--ac-danger-text)",
+                border: "1px solid var(--ac-danger-border)"
+              }
+            },
+            import_react.default.createElement(SvgIcon, { size: 18, paths: ICONS.alert })
+          ),
+          import_react.default.createElement(
+            "div",
+            { style: { flex: 1, minWidth: 0 } },
+            import_react.default.createElement(
+              "div",
+              {
+                id: "ac-confirm-permanent-title",
+                style: { fontSize: 14, fontWeight: 600, color: "var(--ac-text-primary)" }
+              },
+              t.confirmPermanentTitle
+            ),
+            import_react.default.createElement(
+              "div",
+              {
+                style: {
+                  marginTop: 6,
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: "var(--ac-text-secondary)"
+                }
+              },
+              t.confirmPermanentDesc(selectedItems.length, formatBytes(selectedBytes))
+            )
+          )
+        ),
+        import_react.default.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+              marginTop: 18
+            }
+          },
+          import_react.default.createElement(
+            "button",
+            {
+              type: "button",
+              className: "ac-btn ac-btn-ghost",
+              onClick: () => setConfirmPermanent(false)
+            },
+            t.cancel
+          ),
+          import_react.default.createElement(
+            "button",
+            {
+              type: "button",
+              className: "ac-btn ac-btn-danger-solid",
+              onClick: () => {
+                setConfirmPermanent(false);
+                void runAction(t.labelPermanentDelete, "/agent-cleaner/api/clean", {
+                  exemptHours,
+                  lang,
+                  dryRun: false,
+                  permanent: true,
+                  selectedIds: selectedItems.map((i) => i.id)
+                });
+              }
+            },
+            t.confirmDelete
           )
         )
       )

@@ -65,6 +65,9 @@ enum Commands {
         /// Language for descriptions and recommendation reasons (zh | en)
         #[arg(long, default_value = "zh")]
         lang: String,
+        /// Permanently delete selected items without moving to trash
+        #[arg(long)]
+        permanent: bool,
     },
     /// Diagnose agent configs for syntax errors and dead MCP links
     Doctor {
@@ -215,6 +218,7 @@ pub fn run() -> Result<()> {
             older_than,
             ids,
             lang,
+            permanent,
         } => {
             let exempt_hours = parse_hours(&older_than)?;
             let parsed_lang = parse_lang(&lang);
@@ -284,6 +288,7 @@ pub fn run() -> Result<()> {
                     selected_ids,
                     only_recommended,
                     lang: Some(parsed_lang),
+                    permanent,
                 },
             )?;
 
@@ -294,8 +299,16 @@ pub fn run() -> Result<()> {
 
             if dry_run {
                 println!(
-                    "{} Would move {} item(s), freeing {}",
+                    "{} Would {} {} item(s), freeing {}",
                     "[DRY-RUN]".yellow().bold(),
+                    if permanent { "permanently delete" } else { "move" },
+                    report.cleaned_count,
+                    format_bytes(report.freed_bytes).cyan()
+                );
+            } else if permanent {
+                println!(
+                    "{} Permanently deleted {} item(s), freed {}",
+                    "[DELETED]".red().bold(),
                     report.cleaned_count,
                     format_bytes(report.freed_bytes).cyan()
                 );
