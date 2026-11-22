@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-cleaner",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding tools inside DeepSeek Harness (DSH).",
   "icon": "icon.svg",
   "author": "funny-dog",

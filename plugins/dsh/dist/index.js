@@ -24,7 +24,7 @@ function readPluginVersion() {
     catch {
         // ignore and fallback
     }
-    return '0.2.3';
+    return '0.2.4';
 }
 export const PLUGIN_VERSION = readPluginVersion();
 export const name = 'agent-cleaner';
