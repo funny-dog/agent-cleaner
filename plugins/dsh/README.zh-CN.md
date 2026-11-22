@@ -41,6 +41,21 @@ dsh plugin --profile web add github:funny-dog/agent-cleaner#path:/plugins/dsh
 
 > **开箱即用**：首次触发扫描时，插件会自动拉取适配当前系统的预编译引擎到 `~/.agent-cleaner/bin/`，无需本地安装 Rust 工具链。
 
+### 多平台一键插件注入与独立命令行（`npx` / `npm`）
+
+无需安装全局 CLI，即可直接为本机 Claude Code、Cursor、Gemini/Antigravity、Codex CLI、OpenCode、DSH 一键注入 MCP + Skill + 斜杠命令（`/clean`、`/doctor`、`/mcp-audit`、`/restore`）：
+
+```bash
+npx -y dsh-agent-cleaner setup
+npx -y dsh-agent-cleaner setup --status
+```
+
+或直接通过 `npx` 启动独立交互命令行：
+
+```bash
+npx dsh-agent-cleaner
+```
+
 ## 可选配置
 
 如需修改默认保护时长、指定本地二进制路径或配置自定义下载镜像，可在 DSH profile 的 `cordis.patch.yml` 中配置：

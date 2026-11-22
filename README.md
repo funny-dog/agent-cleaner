@@ -8,10 +8,9 @@ Disk cleanup, orphan MCP process audit, and comment-preserving config repair for
 
 ## Overview
 
-AI coding agents leave behind gigabytes of shadow Git snapshots, orphaned session logs, undeclared `node_modules`, cold `npx`/`uv` caches, and zombie `PPID=1` stdio MCP processes. `agent-cleaner` provides a shared Rust engine (`cleaner-core`) with three interfaces:
+AI coding agents leave behind gigabytes of shadow Git snapshots, orphaned session logs, undeclared `node_modules`, cold `npx`/`uv` caches, and zombie `PPID=1` stdio MCP processes. `agent-cleaner` provides a shared Rust engine (`cleaner-core`) with two interfaces:
 
 - **CLI (`ac` / `agent-cleaner`)**: Fast terminal scanner, interactive cleaner, config doctor, and built-in stdio MCP server.
-- **Desktop App (`apps/desktop`)**: Tauri 2.0 menu-bar utility and dashboard with on-demand webview lifecycle.
 - **Agent Plugins (`plugins/`)**:
   - `plugins/universal`: MCP server + `SKILL.md` + slash commands for Claude Code, Cursor, and Antigravity.
   - `plugins/dsh` ([`dsh-agent-cleaner`](plugins/dsh/README.md)): Cordis plugin and sidebar panel for DeepSeek Harness (DSH).
@@ -32,8 +31,6 @@ agent-cleaner/
 ├── crates/
 │   ├── cleaner-core/       # Core scanning, trash, MCP audit, config doctor, and stdio MCP server
 │   └── cleaner-cli/        # CLI binary (`ac` & `agent-cleaner`)
-├── apps/
-│   └── desktop/            # Tauri 2.0 desktop app (tray popover + dashboard)
 └── plugins/
     ├── universal/          # Claude Code / Antigravity / Cursor plugin (MCP + Skill + commands)
     └── dsh/                # DeepSeek Harness plugin (`dsh-agent-cleaner`)
@@ -41,37 +38,95 @@ agent-cleaner/
 
 ## Quick Start
 
-### 1. CLI (`ac`)
+### 1. CLI (`ac` / `agent-cleaner`)
+
+#### Option A: One-line installer (Recommended, no Rust required)
+
+**macOS / Linux:**
 
 ```bash
-cargo build --release -p cleaner-cli
-
-./target/release/ac scan
-./target/release/ac clean --dry-run
-./target/release/ac clean --only-recommended
-./target/release/ac doctor --fix
-./target/release/ac mcp --kill
-./target/release/ac restore <batchId>
+curl -fsSL https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install.sh | sh
 ```
 
-### 2. Desktop App
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install.ps1 | iex
+```
+
+#### Option B: Run or install via `npx` / `npm` (no Rust required)
 
 ```bash
-npm install
-npm run dev:desktop
+# Run immediately without installing
+npx dsh-agent-cleaner
+
+# Or install globally to get `ac` and `agent-cleaner` in PATH
+npm install -g dsh-agent-cleaner
 ```
 
-### 3. Plugins
+#### Option C: Install from local repository clone
 
-- **Claude Code / Cursor / Antigravity**: Point your client at `plugins/universal` (or add `funny-dog/agent-cleaner` via `.claude-plugin/marketplace.json`). Requires `agent-cleaner` in `$PATH`.
-- **DeepSeek Harness (DSH)**: Install `dsh-agent-cleaner` (see [`plugins/dsh/README.md`](plugins/dsh/README.md)).
+```bash
+npm run install:cli
+```
+
+#### Usage
+
+Run `ac` with no arguments to view the overview dashboard and enter the interactive wizard, or use subcommands directly:
+
+```bash
+ac                  # Interactive wizard menu (or overview summary in non-TTY pipes)
+ac scan
+ac clean --dry-run
+ac clean --only-recommended
+ac doctor --fix
+ac mcp --kill
+ac restore <batchId>
+```
+
+### 2. Plugins (No Global CLI Required)
+
+#### Option A: One-command multi-platform plugin setup (no global CLI, no PATH changes)
+
+Automatically detects **Claude Code, Cursor, Gemini / Antigravity, Codex CLI, OpenCode, and DSH**, preserves comments and backs up existing configs to `~/.agent-cleaner/backups/`, and installs the **MCP Server (`npx -y dsh-agent-cleaner mcp-server`) + dual-channel Skill + slash commands (`/clean`, `/doctor`, `/mcp-audit`, `/restore`)**:
+
+```bash
+# Interactive setup (or use --yes to auto-install onto all detected platforms)
+npx -y dsh-agent-cleaner setup
+npx -y dsh-agent-cleaner setup --yes
+
+# Or via one-line shell script
+curl -fsSL https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install-plugin.sh | sh
+
+# Check status, target specific platforms, or uninstall cleanly
+npx -y dsh-agent-cleaner setup --status
+npx -y dsh-agent-cleaner setup --agent claude,cursor,gemini,codex,opencode,dsh
+npx -y dsh-agent-cleaner setup --uninstall
+```
+
+#### Option B: Native platform plugin / Skill commands
+
+- **Claude Code**:
+  ```text
+  /plugin marketplace add funny-dog/agent-cleaner
+  /plugin install agent-cleaner
+  ```
+- **Universal Skills (Cursor / Codex / Gemini / Claude / OpenCode)**:
+  ```bash
+  npx skills add funny-dog/agent-cleaner
+  ```
+- **DeepSeek Harness (DSH)**:
+  ```bash
+  dsh plugin --profile web add dsh-agent-cleaner
+  ```
+  See [`plugins/dsh/README.md`](plugins/dsh/README.md) for details.
 
 ## Development & Tests
 
 ```bash
+cargo build --release -p cleaner-cli
 cargo test --workspace
 npm run typecheck
-npm --workspace=@agent-cleaner/desktop run build
 npm --workspace=dsh-agent-cleaner run build
 npm --workspace=dsh-agent-cleaner test
 ```

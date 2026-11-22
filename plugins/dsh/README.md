@@ -41,6 +41,21 @@ dsh plugin --profile web add github:funny-dog/agent-cleaner#path:/plugins/dsh
 
 > **Zero Setup**: On first scan, the plugin automatically downloads the matching prebuilt `agent-cleaner` engine for your OS/architecture into `~/.agent-cleaner/bin/`. No Rust toolchain is required.
 
+### Cross-Platform Plugin Injector & Standalone CLI (`npx` / `npm`)
+
+Install Agent Cleaner plugins (MCP + Skill + `/clean`, `/doctor`, `/mcp-audit`, `/restore` commands) across Claude Code, Cursor, Gemini/Antigravity, Codex CLI, OpenCode, and DSH without installing a global CLI:
+
+```bash
+npx -y dsh-agent-cleaner setup
+npx -y dsh-agent-cleaner setup --status
+```
+
+Or run the standalone interactive CLI directly:
+
+```bash
+npx dsh-agent-cleaner
+```
+
 ## Optional Configuration
 
 If you want to customize the 24-hour protection window, point to a local binary, or use a custom download mirror, add this to your profile's `cordis.patch.yml`:

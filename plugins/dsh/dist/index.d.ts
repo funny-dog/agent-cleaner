@@ -7,6 +7,7 @@ export interface DshPluginConfig {
 export declare const name = "agent-cleaner";
 export declare const inject: string[];
 export declare function resolveReleaseAssetName(platform?: NodeJS.Platform, arch?: string): string;
+export declare function isNativeBinaryCandidate(filePath: string): boolean;
 export declare function findExistingBinaryPath(configured?: string): string | null;
 export declare function extractBinaryFromTarGz(gzBuffer: Buffer, targetFileName: string): Buffer;
 export declare function ensureBinaryPath(config?: DshPluginConfig): Promise<string>;

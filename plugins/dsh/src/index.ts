@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -16,6 +17,7 @@ import {
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 
@@ -70,6 +72,21 @@ export function resolveReleaseAssetName(
   );
 }
 
+const WRAPPER_EXTENSIONS = ['.js', '.mjs', '.cjs', '.cmd', '.ps1', '.bat'];
+const SELF_CLI_PATHS = (() => {
+  const paths = new Set<string>();
+  try {
+    const localPath = fileURLToPath(new URL('./cli.js', import.meta.url));
+    paths.add(localPath);
+    if (existsSync(localPath)) {
+      paths.add(realpathSync(localPath));
+    }
+  } catch {
+    // ignore in non-file URL environments
+  }
+  return paths;
+})();
+
 function isExistingFile(filePath: string): boolean {
   try {
     return existsSync(filePath) && statSync(filePath).isFile();
@@ -78,12 +95,50 @@ function isExistingFile(filePath: string): boolean {
   }
 }
 
+export function isNativeBinaryCandidate(filePath: string): boolean {
+  if (!isExistingFile(filePath)) return false;
+
+  let resolved = filePath;
+  try {
+    resolved = realpathSync(filePath);
+  } catch {
+    // keep original path if realpath fails
+  }
+
+  if (SELF_CLI_PATHS.has(resolved) || SELF_CLI_PATHS.has(filePath)) {
+    return false;
+  }
+
+  const lower = resolved.toLowerCase();
+  if (WRAPPER_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return false;
+  }
+
+  try {
+    const st = statSync(resolved);
+    if (st.size < 32 * 1024) {
+      const snippet = readFileSync(resolved, 'utf8');
+      if (
+        snippet.includes('dsh-agent-cleaner') ||
+        snippet.includes('dist/cli.js') ||
+        snippet.includes('dist\\cli.js')
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
 function findInPath(binName: string): string | null {
   const pathEnv = process.env.PATH ?? '';
   for (const dir of pathEnv.split(path.delimiter)) {
     if (!dir) continue;
     const candidate = path.join(dir, binName);
-    if (isExistingFile(candidate)) return candidate;
+    if (isNativeBinaryCandidate(candidate)) return candidate;
   }
   return null;
 }
@@ -109,7 +164,7 @@ export function findExistingBinaryPath(configured?: string): string | null {
   const binName = binaryFilename();
   const home = os.homedir();
   const managed = managedBinaryPath();
-  if (isExistingFile(managed)) {
+  if (isNativeBinaryCandidate(managed)) {
     if (readManagedBinaryVersion() === PLUGIN_VERSION) {
       return managed;
     }
@@ -120,7 +175,7 @@ export function findExistingBinaryPath(configured?: string): string | null {
     path.join(home, '.cargo', 'bin', binName),
   ];
   for (const candidate of candidates) {
-    if (isExistingFile(candidate)) return candidate;
+    if (isNativeBinaryCandidate(candidate)) return candidate;
   }
   return findInPath(binName);
 }

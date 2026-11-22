@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "agent-cleaner": {
-      "command": "agent-cleaner",
+      "command": "npx",
       "args": [
+        "-y",
+        "dsh-agent-cleaner",
         "mcp-server"
       ]
     }

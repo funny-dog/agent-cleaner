@@ -11,6 +11,7 @@
   "commands": [
     "./commands/clean.md",
     "./commands/doctor.md",
-    "./commands/mcp-audit.md"
+    "./commands/mcp-audit.md",
+    "./commands/restore.md"
   ]
 }

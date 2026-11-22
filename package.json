@@ -15,6 +15,7 @@
     "dev:desktop": "npm --workspace=@agent-cleaner/desktop run tauri dev",
     "build:desktop": "npm --workspace=@agent-cleaner/desktop run tauri build",
     "build:plugins": "npm --workspace=dsh-agent-cleaner run build",
+    "install:cli": "sh ./install.sh --local",
     "typecheck": "npm --workspace=@agent-cleaner/desktop run typecheck && npm --workspace=dsh-agent-cleaner run typecheck"
   }
 }

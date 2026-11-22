@@ -10,10 +10,9 @@
 
 日常使用多个 AI 编程助手时，本地往往会堆积数 GB 的 Shadow Git 快照、孤儿会话记录、安装中断残留的 `node_modules`、长期未访问的 `npx`/`uv` 缓存，以及父进程退出后残留的 `PPID=1` 僵尸 MCP 进程。
 
-`agent-cleaner` 基于统一的 Rust 核心库（`cleaner-core`），同时提供命令行、桌面端与插件三种使用方式：
+`agent-cleaner` 基于统一的 Rust 核心库（`cleaner-core`），同时提供命令行与插件两种使用方式：
 
 - **命令行 (`ac` / `agent-cleaner`)**：支持终端扫描、交互式勾选清理、配置修复、孤儿进程查杀，并内置标准 stdio MCP Server。
-- **桌面应用 (`apps/desktop`)**：基于 Tauri 2.0，提供状态栏常驻托盘与按需加载的主管理面板。
 - **客户端插件 (`plugins/`)**：
   - `plugins/universal`：适用于 Claude Code、Cursor、Antigravity 的通用插件（MCP + `SKILL.md` + 斜杠命令）。
   - `plugins/dsh`（[`dsh-agent-cleaner`](plugins/dsh/README.zh-CN.md)）：适用于 DeepSeek Harness (DSH) 的 Cordis 插件与侧边栏面板。
@@ -34,8 +33,6 @@ agent-cleaner/
 ├── crates/
 │   ├── cleaner-core/       # Rust 核心库（扫描、回收站、MCP 审计、配置修复、MCP Server）
 │   └── cleaner-cli/        # 命令行二进制 (`ac` 与 `agent-cleaner`)
-├── apps/
-│   └── desktop/            # Tauri 2.0 桌面端（系统托盘 + 主面板）
 └── plugins/
     ├── universal/          # 通用插件（plugin.json + mcp.json + SKILL.md + commands）
     └── dsh/                # DSH 插件 (`dsh-agent-cleaner`)
@@ -43,37 +40,95 @@ agent-cleaner/
 
 ## 快速开始
 
-### 1. 命令行 (`ac`)
+### 1. 命令行 (`ac` / `agent-cleaner`)
+
+#### 方式一：一键脚本安装（推荐，免安装 Rust）
+
+**macOS / Linux：**
 
 ```bash
-cargo build --release -p cleaner-cli
-
-./target/release/ac scan
-./target/release/ac clean --dry-run
-./target/release/ac clean --only-recommended
-./target/release/ac doctor --fix
-./target/release/ac mcp --kill
-./target/release/ac restore <batchId>
+curl -fsSL https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install.sh | sh
 ```
 
-### 2. 桌面应用 (Tauri 2.0)
+**Windows (PowerShell)：**
+
+```powershell
+irm https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install.ps1 | iex
+```
+
+#### 方式二：通过 `npx` / `npm` 免编译运行
 
 ```bash
-npm install
-npm run dev:desktop
+# 免安装直接运行
+npx dsh-agent-cleaner
+
+# 或全局安装后直接使用 `ac` / `agent-cleaner`
+npm install -g dsh-agent-cleaner
 ```
 
-### 3. 插件接入
+#### 方式三：从本地仓库一键安装
 
-- **通用插件 (`plugins/universal/`)**：仓库根目录已包含 `.claude-plugin/marketplace.json`，支持通过 `agent-cleaner mcp-server` 提供 5 个标准 MCP 工具及 `/clean`、`/doctor`、`/mcp-audit` 命令。
-- **DSH 插件 (`dsh-agent-cleaner`)**：包含 DSH 侧边栏可视化面板与 4 个 Cordis 工具，详见 [`plugins/dsh/README.zh-CN.md`](plugins/dsh/README.zh-CN.md)。
+```bash
+npm run install:cli
+```
+
+#### 日常使用
+
+直接运行 `ac` 即可查看健康总览并进入交互式向导菜单，也可以直接使用子命令：
+
+```bash
+ac                  # 启动交互式向导菜单（非 TTY 管道环境下输出总览）
+ac scan
+ac clean --dry-run
+ac clean --only-recommended
+ac doctor --fix
+ac mcp --kill
+ac restore <batchId>
+```
+
+### 2. 插件接入（免装全局 CLI，开箱即用）
+
+#### 方式一：多平台一键插件注入（不安装全局 CLI、不修改 PATH）
+
+自动探测本机已安装的 **Claude Code、Cursor、Gemini / Antigravity、Codex CLI、OpenCode、DSH**，修改前自动备份至 `~/.agent-cleaner/backups/`，并保注释写入 **MCP Server（`npx -y dsh-agent-cleaner mcp-server`）+ 双通道 Skill + 斜杠快捷命令（`/clean`、`/doctor`、`/mcp-audit`、`/restore`）**：
+
+```bash
+# 交互式确认安装（或加 --yes 自动安装到本机所有已探测平台）
+npx -y dsh-agent-cleaner setup
+npx -y dsh-agent-cleaner setup --yes
+
+# 或使用单行脚本一键注入插件
+curl -fsSL https://raw.githubusercontent.com/funny-dog/agent-cleaner/main/install-plugin.sh | sh
+
+# 查看安装状态、指定平台或无损卸载
+npx -y dsh-agent-cleaner setup --status
+npx -y dsh-agent-cleaner setup --agent claude,cursor,gemini,codex,opencode,dsh
+npx -y dsh-agent-cleaner setup --uninstall
+```
+
+#### 方式二：各平台原生插件 / Skill 命令直装
+
+- **Claude Code**：
+  ```text
+  /plugin marketplace add funny-dog/agent-cleaner
+  /plugin install agent-cleaner
+  ```
+- **通用 Skills 生态（Cursor / Codex / Gemini / Claude / OpenCode）**：
+  ```bash
+  npx skills add funny-dog/agent-cleaner
+  ```
+- **DeepSeek Harness (DSH)**：
+  ```bash
+  dsh plugin --profile web add dsh-agent-cleaner
+  ```
+  详见 [`plugins/dsh/README.zh-CN.md`](plugins/dsh/README.zh-CN.md)。
 
 ## 构建与测试
 
 ```bash
+cargo build --release -p cleaner-cli
 cargo test --workspace
 npm run typecheck
-npm --workspace=@agent-cleaner/desktop run build
 npm --workspace=dsh-agent-cleaner run build
 npm --workspace=dsh-agent-cleaner test
 ```

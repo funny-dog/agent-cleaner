@@ -21,3 +21,10 @@ const wrapped = `window.__ModuleLoader__.load({ id: "dsh-agent-cleaner", factory
 await fs.mkdir(path.dirname(outFile), { recursive: true });
 await fs.writeFile(outFile, wrapped, 'utf8');
 console.log('Built DSH client bundle:', outFile);
+
+const cliFile = path.join(pkgDir, 'dist', 'cli.js');
+try {
+  await fs.chmod(cliFile, 0o755);
+} catch {
+  // ignore if cli.js is missing or chmod is unsupported
+}

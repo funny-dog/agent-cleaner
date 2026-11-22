@@ -29,6 +29,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-cleaner": "./dist/cli.js",
+    "ac": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -51,6 +55,10 @@
   },
   "files": [
     "icon.svg",
+    "dist/cli.js",
+    "dist/cli.d.ts",
+    "dist/setup.js",
+    "dist/setup.d.ts",
     "dist/index.js",
     "dist/index.d.ts",
     "dist/client.js",
