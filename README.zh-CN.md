@@ -16,6 +16,7 @@
 - **客户端插件 (`plugins/`)**：
   - `plugins/universal`：适用于 Claude Code、Cursor、Antigravity 的通用插件（MCP + `SKILL.md` + 斜杠命令）。
   - `plugins/dsh`（[`dsh-agent-cleaner`](plugins/dsh/README.zh-CN.md)）：适用于 DeepSeek Harness (DSH) 的 Cordis 插件与侧边栏面板。
+- **桌面应用 (`apps/desktop`)**：Claude 风格的 Tauri 仪表盘与托盘，显示主目录所在磁盘的剩余空间（低于 10% 时高亮警告）。
 
 ## 安全机制与特性
 

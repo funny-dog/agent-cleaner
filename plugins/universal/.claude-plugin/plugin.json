@@ -1,6 +1,6 @@
 {
   "name": "agent-cleaner",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Disk cleanup, orphan MCP process audit, and comment-preserving config repair for AI coding agents.",
   "author": {
     "name": "funny-dog"

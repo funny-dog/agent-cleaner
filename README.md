@@ -14,6 +14,7 @@ AI coding agents leave behind gigabytes of shadow Git snapshots, orphaned sessio
 - **Agent Plugins (`plugins/`)**:
   - `plugins/universal`: MCP server + `SKILL.md` + slash commands for Claude Code, Cursor, and Antigravity.
   - `plugins/dsh` ([`dsh-agent-cleaner`](plugins/dsh/README.md)): Cordis plugin and sidebar panel for DeepSeek Harness (DSH).
+- **Desktop app (`apps/desktop`)**: Tauri dashboard and tray with a Claude-style UI; shows free disk space of your home volume (highlighted when below 10%).
 
 ## Key Safeguards
 

@@ -1,7 +1,7 @@
 {
   "id": "agent-cleaner",
   "name": "Agent Cleaner",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Disk cleanup, orphan session/MCP process auditing, and comment-preserving config repair across Claude Code, OpenCode, Codex CLI, DSH, Gemini/Antigravity, and Cursor.",
   "repository": "https://github.com/funny-dog/agent-cleaner",
   "mcpServers": "./mcp.json",
