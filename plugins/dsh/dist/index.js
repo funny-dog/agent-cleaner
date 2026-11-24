@@ -3,13 +3,22 @@
  * Exposes headless Cordis Tools and HTTP bridge routes backed by the `agent-cleaner` binary.
  */
 import { execFile } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, statfsSync, writeFileSync, } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 const execFileAsync = promisify(execFile);
+function getDiskSpace() {
+    try {
+        const st = statfsSync(os.homedir());
+        return { totalBytes: st.blocks * st.bsize, availableBytes: st.bavail * st.bsize };
+    }
+    catch {
+        return null;
+    }
+}
 const REPO_DOWNLOAD_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/download';
 const REPO_RELEASE_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/latest/download';
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -24,7 +33,7 @@ function readPluginVersion() {
     catch {
         // ignore and fallback
     }
-    return '0.2.4';
+    return '0.2.5';
 }
 export const PLUGIN_VERSION = readPluginVersion();
 export const name = 'agent-cleaner';
@@ -427,6 +436,7 @@ function registerHttpRoutes(ctx, config, defaultHours) {
                             doctors,
                             mcpAudit,
                             trash,
+                            disk: getDiskSpace(),
                             exemptHours: safeHours,
                             lang,
                             scannedAt: Date.now(),
