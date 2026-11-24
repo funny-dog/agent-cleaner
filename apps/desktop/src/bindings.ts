@@ -6,6 +6,8 @@ import type { InvokeOptions } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	getOverview: (options: ScanOptions_Deserialize | null, force: boolean | null, _options?: InvokeOptions) => typedError<OverviewReport_Serialize, string>(__TAURI_INVOKE("get_overview", { options, force }, _options)),
+	/**  Disk space of the volume that holds the user's home directory. */
+	getDiskSpace: (options?: InvokeOptions) => typedError<DiskSpace, string>(__TAURI_INVOKE("get_disk_space", undefined, options)),
 	scan: (options: ScanOptions_Deserialize | null, _options?: InvokeOptions) => typedError<ScanResult[], string>(__TAURI_INVOKE("scan", { options }, _options)),
 	clean: (options: CleanOptions_Deserialize, _options?: InvokeOptions) => typedError<CleanReport_Serialize, string>(__TAURI_INVOKE("clean", { options }, _options)),
 	listTrash: (options?: InvokeOptions) => typedError<TrashManifest[], string>(__TAURI_INVOKE("list_trash", undefined, options)),
@@ -70,6 +72,11 @@ export type ColdCacheEntry = {
 	path: string,
 	sizeBytes: number | null,
 	lastAccessDays: number | null,
+};
+
+export type DiskSpace = {
+	totalBytes: number | null,
+	availableBytes: number | null,
 };
 
 export type DoctorFixReport = DoctorFixReport_Serialize | DoctorFixReport_Deserialize;

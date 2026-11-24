@@ -12,6 +12,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  statfsSync,
   writeFileSync,
 } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -22,6 +23,15 @@ import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 
 const execFileAsync = promisify(execFile);
+
+function getDiskSpace(): { totalBytes: number; availableBytes: number } | null {
+  try {
+    const st = statfsSync(os.homedir());
+    return { totalBytes: st.blocks * st.bsize, availableBytes: st.bavail * st.bsize };
+  } catch {
+    return null;
+  }
+}
 
 const REPO_DOWNLOAD_BASE = 'https://github.com/funny-dog/agent-cleaner/releases/download';
 const REPO_RELEASE_BASE =
@@ -38,7 +48,7 @@ function readPluginVersion(): string {
   } catch {
     // ignore and fallback
   }
-  return '0.2.4';
+  return '0.2.5';
 }
 
 export const PLUGIN_VERSION = readPluginVersion();
@@ -494,6 +504,7 @@ function registerHttpRoutes(
               doctors,
               mcpAudit,
               trash,
+              disk: getDiskSpace(),
               exemptHours: safeHours,
               lang,
               scannedAt: Date.now(),

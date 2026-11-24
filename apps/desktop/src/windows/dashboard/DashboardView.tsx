@@ -19,23 +19,22 @@ import {
 } from 'lucide-react';
 import {
   commands,
+  type DiskSpace,
   type OverviewReport,
   type ScanItem,
   type TrashManifest,
 } from '../../bindings';
-import { agentLabel, formatBytes, formatTimeAgo } from '../../utils/format';
+import { agentLabel, formatBytes, formatTimeAgo, isDiskLow } from '../../utils/format';
 import { DICT, readStoredLang, writeStoredLang, type Lang } from '../../utils/i18n';
 
 type Tab = 'cleanup' | 'mcp' | 'doctor' | 'trash';
 
 const AGENT_COLORS = [
-  'bg-cyan-500',
-  'bg-blue-500',
-  'bg-emerald-500',
-  'bg-amber-500',
-  'bg-indigo-500',
-  'bg-rose-500',
-  'bg-teal-500',
+  'bg-agent-clay',
+  'bg-agent-olive',
+  'bg-agent-ochre',
+  'bg-agent-sage',
+  'bg-agent-taupe',
 ];
 
 export function DashboardView() {
@@ -48,6 +47,7 @@ export function DashboardView() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exemptHours, setExemptHours] = useState<number>(24);
+  const [disk, setDisk] = useState<DiskSpace | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [confirmPermanent, setConfirmPermanent] = useState<boolean>(false);
@@ -66,6 +66,7 @@ export function DashboardView() {
   ) => {
     setLoading(true);
     try {
+      void commands.getDiskSpace().then((r) => r.status === 'ok' && setDisk(r.data));
       const [ovRes, trRes] = await Promise.all([
         commands.getOverview({ exemptHours: hours, agentFilter: null, lang: curLang }, force),
         commands.listTrash(),
@@ -414,34 +415,35 @@ export function DashboardView() {
   const exemptCount = rawItems.filter((i) => i.recommendation === 'exempt').length;
 
   return (
-    <div className="flex h-screen flex-col bg-[#060a13] bg-[radial-gradient(ellipse_at_top,_rgba(59,130,246,0.08),_transparent_55%)] text-slate-100">
-      {/* Header (draggable in Tauri) */}
+    <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
       <header
         data-tauri-drag-region
-        className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 bg-[#080d19]/90 px-6 py-4 backdrop-blur select-none"
+        className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-surface/90 px-6 py-4 backdrop-blur select-none"
       >
         <div data-tauri-drag-region className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 text-cyan-400 ring-1 ring-cyan-500/35">
+          <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-accent-soft text-accent ring-1 ring-accent/20">
             <Sparkles className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-base font-semibold tracking-tight text-slate-50">Agent Cleaner</h1>
-            <p className="text-xs text-slate-400">{t.subtitle}</p>
+            <h1 className="font-display text-[22px] font-medium leading-none tracking-[-0.02em]">
+              Agent Cleaner
+            </h1>
+            <p className="mt-1.5 text-xs text-muted">{t.subtitle}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={toggleLanguage}
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-800 bg-[#0b1120] px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-slate-700 hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-cyan-500"
+            className="btn btn-ghost"
             title={lang === 'zh' ? 'Switch to English' : '切换为中文'}
           >
-            <Globe className="h-3.5 w-3.5 text-cyan-400" />
+            <Globe className="h-3.5 w-3.5 text-accent" />
             <span>{lang === 'zh' ? '中文 / EN' : 'EN / 中文'}</span>
           </button>
 
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-800 bg-[#0b1120] px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-700">
-            <span className="text-slate-400">{t.guardLabel}</span>
+          <label className="field">
+            <span>{t.guardLabel}</span>
             <select
               value={exemptHours}
               disabled={loading || busy}
@@ -450,7 +452,7 @@ export function DashboardView() {
                 setExemptHours(h);
                 void refreshAll(h, lang, false, true);
               }}
-              className="cursor-pointer bg-transparent font-medium text-cyan-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="font-medium text-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value={0}>{t.guardOff}</option>
               <option value={12}>{t.h12}</option>
@@ -461,7 +463,7 @@ export function DashboardView() {
           </label>
 
           {summary?.scannedAt && (
-            <span className="text-[11px] whitespace-nowrap text-slate-400">
+            <span className="px-1 text-[11px] whitespace-nowrap text-subtle tabular-nums">
               {t.lastScanned(formatTimeAgo(summary.scannedAt, lang))}
             </span>
           )}
@@ -469,7 +471,7 @@ export function DashboardView() {
           <button
             onClick={() => void refreshAll(exemptHours, lang, false, true)}
             disabled={loading || busy}
-            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-800 bg-[#0b1120] px-3.5 py-1.5 text-xs font-medium text-slate-200 transition-colors duration-200 hover:border-slate-700 hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-secondary"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>{loading ? t.scanning : t.rescan}</span>
@@ -477,90 +479,119 @@ export function DashboardView() {
         </div>
       </header>
 
-      {/* Workspace Body (relative host for centered scanning overlay) */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         {loading && (
           <div
             role="status"
             aria-live="polite"
-            className="absolute inset-0 z-20 flex items-center justify-center bg-[#060a13]/75 px-6 backdrop-blur-[3px]"
+            className="absolute inset-0 z-20 flex items-center justify-center bg-canvas/80 px-6 backdrop-blur-[3px]"
           >
-            <div className="flex w-full max-w-sm flex-col items-center rounded-2xl border border-cyan-500/25 bg-[#0b1120]/95 px-8 py-7 text-center shadow-2xl shadow-cyan-950/30">
+            <div className="panel flex w-full max-w-sm flex-col items-center px-8 py-7 text-center">
               <div className="relative flex h-20 w-20 items-center justify-center">
-                <div className="absolute inset-0 animate-spin rounded-full border-[3px] border-cyan-500/15 border-t-cyan-400" />
+                <div className="absolute inset-0 animate-spin rounded-full border-[3px] border-accent/15 border-t-accent" />
                 <div
-                  className="absolute inset-2.5 animate-spin rounded-full border-2 border-blue-500/15 border-b-blue-400"
+                  className="absolute inset-2.5 animate-spin rounded-full border-2 border-agent-ochre/15 border-b-agent-ochre"
                   style={{ animationDirection: 'reverse', animationDuration: '1.25s' }}
                 />
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/30">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-soft text-accent ring-1 ring-accent/20">
                   <Sparkles className="h-5 w-5" />
                 </div>
               </div>
-              <p className="mt-4 text-sm font-semibold tracking-tight text-slate-100">
+              <p className="mt-4 font-display text-xl font-medium tracking-tight">
                 {overview ? t.rescanningTitle : t.scanningTitle}
               </p>
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+              <p className="mt-1.5 text-xs leading-relaxed text-muted">
                 {t.scanningSubtitle}
               </p>
             </div>
           </div>
         )}
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-4 px-6 pt-5 lg:grid-cols-4">
-        <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-4 transition-colors duration-200 hover:border-slate-700">
-          <div className="flex items-center justify-between text-xs font-medium text-slate-400">
-            <span>{t.totalDisk}</span>
-            <HardDrive className="h-4 w-4 text-blue-400" />
+      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-2 gap-4 px-6 pt-5 lg:grid-cols-5">
+        <div className="panel p-5">
+          <div className="flex items-center justify-between text-xs font-medium text-muted">
+            <span>{t.diskSpace}</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-canvas text-muted">
+              <HardDrive className="h-4 w-4" />
+            </span>
           </div>
-          <div className="mt-2 font-mono text-2xl font-bold tracking-tight text-slate-50 tabular-nums">
+          <div
+            className={`mt-3 text-[28px] font-medium tracking-[-0.03em] tabular-nums ${
+              isDiskLow(disk) ? 'text-warning' : 'text-ink'
+            }`}
+          >
+            {disk ? formatBytes(disk.availableBytes) : '--'}
+          </div>
+          <div className="mt-1 text-[11px] text-subtle">
+            {disk?.totalBytes && disk.availableBytes != null
+              ? t.diskSpaceHint(
+                  formatBytes(disk.totalBytes),
+                  Math.round((1 - disk.availableBytes / disk.totalBytes) * 100),
+                )
+              : ''}
+          </div>
+        </div>
+
+        <div className="panel p-5">
+          <div className="flex items-center justify-between text-xs font-medium text-muted">
+            <span>{t.totalDisk}</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-canvas text-muted">
+              <HardDrive className="h-4 w-4" />
+            </span>
+          </div>
+          <div className="mt-3 text-[28px] font-medium tracking-[-0.03em] text-ink tabular-nums">
             {summary ? formatBytes(summary.totalDiskUsageBytes) : '--'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">
+          <div className="mt-1 text-[11px] text-subtle">
             {t.ecosystemCount(overview?.agents.length ?? 0)}
           </div>
         </div>
 
-        <div className="rounded-xl border border-emerald-500/20 bg-[#0b1120]/90 p-4 transition-colors duration-200 hover:border-emerald-500/40">
-          <div className="flex items-center justify-between text-xs font-medium text-slate-400">
+        <div className="panel border-accent/20 p-5">
+          <div className="flex items-center justify-between text-xs font-medium text-muted">
             <span>{t.recClean}</span>
-            <Sparkles className="h-4 w-4 text-emerald-400" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-accent-soft text-accent">
+              <Sparkles className="h-4 w-4" />
+            </span>
           </div>
-          <div className="mt-2 font-mono text-2xl font-bold tracking-tight text-emerald-400 tabular-nums">
+          <div className="mt-3 text-[28px] font-medium tracking-[-0.03em] text-accent-strong tabular-nums">
             {summary ? formatBytes(summary.recommendedBytes) : '--'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">{t.recItemsCount(recCount)}</div>
+          <div className="mt-1 text-[11px] text-subtle">{t.recItemsCount(recCount)}</div>
         </div>
 
-        <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-4 transition-colors duration-200 hover:border-slate-700">
-          <div className="flex items-center justify-between text-xs font-medium text-slate-400">
+        <div className="panel p-5">
+          <div className="flex items-center justify-between text-xs font-medium text-muted">
             <span>{t.orphanMcp}</span>
-            <Cpu className="h-4 w-4 text-amber-400" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-canvas text-muted">
+              <Cpu className="h-4 w-4" />
+            </span>
           </div>
           <div
-            className={`mt-2 font-mono text-2xl font-bold tracking-tight tabular-nums ${
-              (summary?.orphanMcpCount ?? 0) > 0 ? 'text-amber-400' : 'text-emerald-400'
+            className={`mt-3 text-[28px] font-medium tracking-[-0.03em] tabular-nums ${
+              (summary?.orphanMcpCount ?? 0) > 0 ? 'text-warning' : 'text-success'
             }`}
           >
             {summary ? summary.orphanMcpCount : '--'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">{t.orphanMcpHint}</div>
+          <div className="mt-1 text-[11px] text-subtle">{t.orphanMcpHint}</div>
         </div>
 
-        <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-4 transition-colors duration-200 hover:border-slate-700">
-          <div className="flex items-center justify-between text-xs font-medium text-slate-400">
+        <div className="panel p-5">
+          <div className="flex items-center justify-between text-xs font-medium text-muted">
             <span>{t.issuesAndTrash}</span>
-            <HeartPulse className="h-4 w-4 text-cyan-400" />
+            <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-canvas text-muted">
+              <HeartPulse className="h-4 w-4" />
+            </span>
           </div>
-          <div className="mt-2 font-mono text-2xl font-bold tracking-tight text-slate-50 tabular-nums">
+          <div className="mt-3 text-[28px] font-medium tracking-[-0.03em] text-ink tabular-nums">
             {summary ? `${summary.doctorIssueCount} / ${trashBatches.length}` : '--'}
           </div>
-          <div className="mt-1 text-[11px] text-slate-500">{t.trashHint}</div>
+          <div className="mt-1 text-[11px] text-subtle">{t.trashHint}</div>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <nav className="flex items-center gap-2 px-6 pt-4">
+      <nav className="mx-auto flex w-full max-w-[1440px] items-center gap-1 px-6 pt-4">
         {[
           { id: 'cleanup' as const, label: t.tabCleanup(rawItems.length), icon: Trash2 },
           {
@@ -581,37 +612,39 @@ export function DashboardView() {
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
+            type="button"
+            aria-pressed={tab === id}
             onClick={() => setTab(id)}
-            className={`flex cursor-pointer items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-cyan-500 ${
+            className={`flex items-center gap-2 rounded-[10px] px-4 py-2 text-[13px] font-medium transition-all duration-150 ${
               tab === id
-                ? 'bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-500/35'
-                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                ? 'bg-surface text-ink shadow-sm ring-1 ring-line'
+                : 'text-muted hover:bg-line-soft/70 hover:text-ink'
             }`}
           >
-            <Icon className="h-3.5 w-3.5" />
+            <Icon className={`h-3.5 w-3.5 ${tab === id ? 'text-accent' : ''}`} />
             <span>{label}</span>
           </button>
         ))}
       </nav>
 
-      {/* Feedback Banner */}
       {banner && (
         <div
           role="alert"
           aria-live="polite"
-          className={`mx-6 mt-3 flex items-center justify-between rounded-xl border px-4 py-2.5 text-xs ${
+          className={`mx-auto mt-3 flex w-[calc(100%_-_3rem)] max-w-[1392px] items-center justify-between rounded-xl border px-4 py-2.5 text-xs ${
             banner.kind === 'error'
-              ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+              ? 'border-danger/25 bg-danger-soft text-danger'
               : banner.kind === 'success'
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+                ? 'border-success/25 bg-success-soft text-success'
+                : 'border-accent/25 bg-accent-soft text-accent-strong'
           }`}
         >
           <span>{banner.text}</span>
           <button
+            type="button"
             onClick={() => setBanner(null)}
             aria-label="Close"
-            className="cursor-pointer rounded p-0.5 opacity-70 transition hover:opacity-100"
+            className="icon-btn -mr-1 h-7 w-7"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -619,18 +652,18 @@ export function DashboardView() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto px-6 py-4">
+      <main className="mx-auto min-h-0 w-full max-w-[1440px] flex-1 overflow-y-auto px-6 py-5">
         {tab === 'cleanup' && (
           <div className="space-y-4">
             {overview && overview.agents.length > 0 && (
-              <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-4">
-                <div className="mb-2.5 flex items-center justify-between text-xs">
-                  <span className="font-medium text-slate-300">{t.breakdownTitle}</span>
-                  <span className="font-mono text-slate-400 tabular-nums">
+              <div className="panel p-5">
+                <div className="mb-3 flex items-center justify-between text-xs">
+                  <span className="font-medium text-body">{t.breakdownTitle}</span>
+                  <span className="text-muted tabular-nums">
                     {t.totalLabel(formatBytes(summary?.totalDiskUsageBytes))}
                   </span>
                 </div>
-                <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800/80">
+                <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-line-soft">
                   {diskBreakdownAgents.map((a, idx) => {
                     const pct = Math.max(
                       1.5,
@@ -644,15 +677,15 @@ export function DashboardView() {
                           setSelectedAgent((prev) => (prev === a.agent ? 'all' : a.agent))
                         }
                         title={`${agentLabel(a.agent)}: ${formatBytes(a.diskUsageBytes)}`}
-                        className={`${AGENT_COLORS[idx % AGENT_COLORS.length]} h-full cursor-pointer transition-opacity duration-200 hover:opacity-85 ${
-                          selectedAgent !== 'all' && selectedAgent !== a.agent ? 'opacity-30' : ''
+                        className={`${AGENT_COLORS[idx % AGENT_COLORS.length]} h-full cursor-pointer transition-opacity duration-200 hover:opacity-80 ${
+                          selectedAgent !== 'all' && selectedAgent !== a.agent ? 'opacity-25' : ''
                         }`}
                         style={{ width: `${pct}%` }}
                       />
                     );
                   })}
                 </div>
-                <div className="mt-2.5 flex flex-wrap gap-3 text-[11px] text-slate-400">
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted">
                   {diskBreakdownAgents.slice(0, 7).map((a, idx) => (
                     <button
                       key={a.agent}
@@ -660,17 +693,17 @@ export function DashboardView() {
                       onClick={() =>
                         setSelectedAgent((prev) => (prev === a.agent ? 'all' : a.agent))
                       }
-                      className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors ${
+                      className={`flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 transition-colors ${
                         selectedAgent === a.agent
-                          ? 'bg-slate-800 text-slate-100'
-                          : 'hover:text-slate-200'
+                          ? 'bg-accent-soft text-accent-strong'
+                          : 'hover:bg-line-soft hover:text-ink'
                       }`}
                     >
                       <span
                         className={`h-2 w-2 rounded-full ${AGENT_COLORS[idx % AGENT_COLORS.length]}`}
                       />
                       <span>{agentLabel(a.agent)}</span>
-                      <span className="font-mono text-slate-500 tabular-nums">
+                      <span className="text-subtle tabular-nums">
                         {formatBytes(a.diskUsageBytes)}
                       </span>
                     </button>
@@ -679,10 +712,9 @@ export function DashboardView() {
               </div>
             )}
 
-            {/* Toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-3">
+            <div className="panel flex flex-wrap items-center justify-between gap-3 p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex rounded-lg border border-slate-800 bg-slate-950/60 p-0.5 text-xs">
+                <div className="flex rounded-[10px] border border-line bg-canvas p-1">
                   {(
                     [
                       ['all', t.filterAll(rawItems.length)],
@@ -693,11 +725,13 @@ export function DashboardView() {
                   ).map(([k, label]) => (
                     <button
                       key={k}
+                      type="button"
+                      aria-pressed={recFilter === k}
                       onClick={() => setRecFilter(k)}
-                      className={`cursor-pointer rounded-md px-2.5 py-1 transition-colors duration-200 ${
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                         recFilter === k
-                          ? 'bg-cyan-500/20 font-semibold text-cyan-300'
-                          : 'text-slate-400 hover:text-slate-200'
+                          ? 'bg-surface text-ink shadow-sm ring-1 ring-line'
+                          : 'text-muted hover:text-ink'
                       }`}
                     >
                       {label}
@@ -705,20 +739,22 @@ export function DashboardView() {
                   ))}
                 </div>
 
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+                <label className="field w-56">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-subtle" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={t.searchPlaceholder}
-                    className="w-48 rounded-lg border border-slate-800 bg-slate-950/60 py-1.5 pl-8 pr-3 text-xs text-slate-200 placeholder:text-slate-500 focus:border-cyan-500/50 focus:outline-none"
+                    aria-label={t.searchPlaceholder}
+                    className="w-full bg-transparent"
                   />
-                </div>
+                </label>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
+                  type="button"
                   onClick={() =>
                     setSelectedIds(
                       new Set(
@@ -728,11 +764,12 @@ export function DashboardView() {
                       ),
                     )
                   }
-                  className="cursor-pointer rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                  className="btn btn-ghost"
                 >
                   {t.selectRec}
                 </button>
                 <button
+                  type="button"
                   onClick={() =>
                     setSelectedIds((prev) => {
                       const next = new Set(prev);
@@ -740,20 +777,23 @@ export function DashboardView() {
                       return next;
                     })
                   }
-                  className="cursor-pointer rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:bg-slate-800"
+                  className="btn btn-ghost"
                 >
                   {t.selectVisible}
                 </button>
                 <button
+                  type="button"
                   onClick={() => setSelectedIds(new Set())}
-                  className="cursor-pointer rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800"
+                  className="btn btn-ghost"
                 >
                   {t.clearSel}
                 </button>
+                <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
                 <button
+                  type="button"
                   onClick={() => void handleClean(false)}
                   disabled={busy || selectedIds.size === 0}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-cyan-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-cyan-400 focus-visible:outline-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="btn btn-primary"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span className="tabular-nums">
@@ -761,9 +801,10 @@ export function DashboardView() {
                   </span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setConfirmPermanent(true)}
                   disabled={busy || selectedIds.size === 0}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/15 px-3.5 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25 focus-visible:outline-2 focus-visible:outline-rose-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="btn btn-danger"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>{t.deletePermanently}</span>
@@ -771,121 +812,119 @@ export function DashboardView() {
               </div>
             </div>
 
-            {/* Items Table */}
             {(overview || !loading) && (
-            <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-[#0b1120]/80">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-slate-800 bg-slate-900/90 text-slate-400">
-                  <tr>
-                    <th className="w-10 px-4 py-2.5">{t.colSelect}</th>
-                    <th className="px-3 py-2.5">{t.colAgent}</th>
-                    <th className="px-3 py-2.5">{t.colDesc}</th>
-                    <th className="px-3 py-2.5">{t.colLevel}</th>
-                    <th className="px-4 py-2.5 text-right">{t.colSize}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {allItems.map((item) => {
-                    const isExempt = item.recommendation === 'exempt';
-                    const checked = selectedIds.has(item.id);
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => toggleItem(item.id)}
-                        className={`cursor-pointer transition-colors duration-150 hover:bg-slate-900/75 ${
-                          checked ? 'bg-cyan-500/[0.04]' : ''
-                        } ${isExempt && !checked ? 'opacity-65' : ''}`}
-                      >
-                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            aria-label={item.description}
-                            onChange={() => toggleItem(item.id)}
-                            className="h-3.5 w-3.5 cursor-pointer rounded border-slate-700 bg-slate-900 accent-cyan-500"
-                          />
-                        </td>
-                        <td className="px-3 py-3 whitespace-nowrap font-medium text-slate-200">
-                          {agentLabel(item.agent)}
-                        </td>
-                        <td className="max-w-lg px-3 py-3">
-                          <div className="font-medium text-slate-100">{item.description}</div>
-                          <div className="mt-0.5 text-[11px] text-slate-400">
-                            {item.recommendationReason}
-                          </div>
-                          <div className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
-                            {item.path}
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          {item.recommendation === 'recommended' && (
-                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/25">
-                              {t.badgeRec}
-                            </span>
-                          )}
-                          {item.recommendation === 'optional' && (
-                            <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-amber-500/25">
-                              {t.badgeOpt}
-                            </span>
-                          )}
-                          {item.recommendation === 'exempt' && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-0.5 text-[11px] text-slate-400">
-                              <Lock className="h-2.5 w-2.5" />
-                              {t.badgeExempt}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-medium text-slate-200 tabular-nums whitespace-nowrap">
-                          {formatBytes(item.sizeBytes)}
-                        </td>
+              <div className="panel overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-xs">
+                    <thead className="border-b border-line bg-canvas/70 text-muted">
+                      <tr>
+                        <th className="w-12 px-4 py-3 font-medium">{t.colSelect}</th>
+                        <th className="px-3 py-3 font-medium">{t.colAgent}</th>
+                        <th className="px-3 py-3 font-medium">{t.colDesc}</th>
+                        <th className="px-3 py-3 font-medium">{t.colLevel}</th>
+                        <th className="px-4 py-3 text-right font-medium">{t.colSize}</th>
                       </tr>
-                    );
-                  })}
-                  {!loading && allItems.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="py-12 text-center text-slate-500">
-                        {t.noItems}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-line-soft">
+                      {allItems.map((item) => {
+                        const isExempt = item.recommendation === 'exempt';
+                        const checked = selectedIds.has(item.id);
+                        return (
+                          <tr
+                            key={item.id}
+                            onClick={() => toggleItem(item.id)}
+                            className={`cursor-pointer transition-colors duration-150 hover:bg-canvas/60 ${
+                              checked ? 'bg-accent-soft/45' : ''
+                            } ${isExempt && !checked ? 'opacity-60' : ''}`}
+                          >
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                aria-label={item.description}
+                                onChange={() => toggleItem(item.id)}
+                                className="checkbox"
+                              />
+                            </td>
+                            <td className="px-3 py-3.5 font-medium whitespace-nowrap text-body">
+                              {agentLabel(item.agent)}
+                            </td>
+                            <td className="max-w-lg px-3 py-3.5">
+                              <div className="font-medium text-ink">{item.description}</div>
+                              <div className="mt-1 text-[11px] leading-relaxed text-muted">
+                                {item.recommendationReason}
+                              </div>
+                              <div className="mt-1 truncate font-mono text-[11px] text-subtle">
+                                {item.path}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3.5 whitespace-nowrap">
+                              {item.recommendation === 'recommended' && (
+                                <span className="badge badge-rec">{t.badgeRec}</span>
+                              )}
+                              {item.recommendation === 'optional' && (
+                                <span className="badge badge-opt">{t.badgeOpt}</span>
+                              )}
+                              {item.recommendation === 'exempt' && (
+                                <span className="badge badge-exempt">
+                                  <Lock className="h-2.5 w-2.5" />
+                                  {t.badgeExempt}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-medium whitespace-nowrap text-body tabular-nums">
+                              {formatBytes(item.sizeBytes)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!loading && allItems.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="py-14 text-center text-muted">
+                            {t.noItems}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
           </div>
         )}
 
         {tab === 'mcp' && overview && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-5">
-              <h2 className="text-sm font-semibold text-slate-100">{t.mcpTitle}</h2>
-              <p className="mt-0.5 text-xs text-slate-400">{t.mcpDesc}</p>
-              <div className="mt-3 space-y-2">
+          <div className="space-y-5">
+            <div className="panel p-6">
+              <h2 className="font-display text-2xl font-medium tracking-[-0.02em]">{t.mcpTitle}</h2>
+              <p className="mt-1.5 max-w-3xl text-xs leading-relaxed text-muted">{t.mcpDesc}</p>
+              <div className="mt-5 space-y-2.5">
                 {overview.mcp.orphanProcesses.map((proc) => (
                   <div
                     key={proc.pid}
-                    className="flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-xs"
+                    className="flex items-center justify-between rounded-xl border border-warning/25 bg-warning-soft/70 px-4 py-3 text-xs"
                   >
                     <div className="min-w-0 pr-4">
-                      <div className="font-semibold text-amber-300 tabular-nums">
+                      <div className="font-semibold text-warning tabular-nums">
                         PID {proc.pid} · {proc.matchedName ?? 'MCP Stdio Process'} (
                         {Math.round((proc.rssKb ?? 0) / 1024)} MB)
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
+                      <div className="mt-1 truncate font-mono text-[11px] text-muted">
                         {proc.command}
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => void handleKillOrphan(proc.pid)}
                       disabled={busy}
-                      className="shrink-0 cursor-pointer rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-slate-950 transition-colors hover:bg-amber-400"
+                      className="btn btn-warning shrink-0"
                     >
                       {t.killSafe}
                     </button>
                   </div>
                 ))}
                 {overview.mcp.orphanProcesses.length === 0 && (
-                  <div className="flex items-center gap-2 text-xs text-emerald-400">
+                  <div className="flex items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-xs text-success">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>{t.noOrphans}</span>
                   </div>
@@ -893,48 +932,48 @@ export function DashboardView() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-5">
-                <h3 className="text-sm font-semibold text-slate-100">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="panel p-6">
+                <h3 className="font-display text-xl font-medium tracking-[-0.01em]">
                   {t.deadLinks(overview.mcp.deadLinks.length)}
                 </h3>
-                <div className="mt-3 space-y-2 text-xs">
+                <div className="mt-4 space-y-2.5 text-xs">
                   {overview.mcp.deadLinks.map((d, idx) => (
-                    <div key={idx} className="rounded-lg border border-slate-800/70 bg-slate-950/60 p-2.5">
-                      <span className="font-semibold text-rose-300">
+                    <div key={idx} className="rounded-xl border border-line bg-canvas/70 p-3">
+                      <span className="font-semibold text-danger">
                         [{d.agent}] {d.name}
                       </span>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+                      <div className="mt-1 truncate font-mono text-[11px] text-subtle">
                         {d.command}
                       </div>
                     </div>
                   ))}
                   {overview.mcp.deadLinks.length === 0 && (
-                    <p className="text-slate-500">{t.noDeadLinks}</p>
+                    <p className="text-muted">{t.noDeadLinks}</p>
                   )}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-5">
-                <h3 className="text-sm font-semibold text-slate-100">
+              <div className="panel p-6">
+                <h3 className="font-display text-xl font-medium tracking-[-0.01em]">
                   {t.coldCaches(overview.mcp.coldCaches.length)}
                 </h3>
-                <div className="mt-3 max-h-52 space-y-1.5 overflow-y-auto text-xs">
+                <div className="mt-4 max-h-52 space-y-2 overflow-y-auto text-xs">
                   {overview.mcp.coldCaches.map((c) => (
                     <div
                       key={c.path}
-                      className="flex items-center justify-between rounded-lg border border-slate-800/70 bg-slate-950/60 px-3 py-2"
+                      className="flex items-center justify-between rounded-xl border border-line bg-canvas/70 px-3 py-2.5"
                     >
-                      <span className="truncate font-mono text-[11px] text-slate-300">
+                      <span className="truncate font-mono text-[11px] text-body">
                         [{c.source}] {c.path.split('/').pop()} ({c.lastAccessDays}d)
                       </span>
-                      <span className="ml-2 shrink-0 font-mono text-slate-400 tabular-nums">
+                      <span className="ml-3 shrink-0 text-muted tabular-nums">
                         {formatBytes(c.sizeBytes)}
                       </span>
                     </div>
                   ))}
                   {overview.mcp.coldCaches.length === 0 && (
-                    <p className="text-slate-500">{t.noColdCaches}</p>
+                    <p className="text-muted">{t.noColdCaches}</p>
                   )}
                 </div>
               </div>
@@ -943,48 +982,49 @@ export function DashboardView() {
         )}
 
         {tab === 'doctor' && overview && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-slate-400">{t.doctorDesc}</p>
+          <div className="space-y-5">
+            <div className="panel flex flex-wrap items-center justify-between gap-4 p-5">
+              <p className="max-w-3xl text-xs leading-relaxed text-muted">{t.doctorDesc}</p>
               <button
+                type="button"
                 onClick={() => void handleDoctorFix()}
                 disabled={busy || (summary?.doctorIssueCount ?? 0) === 0}
-                className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-cyan-500 px-3.5 py-1.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="btn btn-primary shrink-0"
               >
                 <Wrench className="h-3.5 w-3.5" />
                 <span>{t.doctorFixBtn}</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               {overview.doctors.map((doc) => (
                 <div
                   key={`${doc.agent}:${doc.path}`}
-                  className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-5"
+                  className="panel p-5"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-slate-100">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-display text-xl font-medium tracking-[-0.01em]">
                       {agentLabel(doc.agent)}
                     </span>
                     {doc.healthy ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> {t.healthy}
+                      <span className="badge badge-rec">
+                        <CheckCircle2 className="h-3 w-3" /> {t.healthy}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-xs text-amber-400">
-                        <ShieldAlert className="h-3.5 w-3.5" /> {t.issueCount(doc.issues.length)}
+                      <span className="badge badge-opt">
+                        <ShieldAlert className="h-3 w-3" /> {t.issueCount(doc.issues.length)}
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 truncate font-mono text-[11px] text-slate-500">
+                  <div className="mt-2 truncate font-mono text-[11px] text-subtle">
                     {doc.path}
                   </div>
                   {doc.issues.length > 0 && (
-                    <div className="mt-3 space-y-1.5">
+                    <div className="mt-4 space-y-2">
                       {doc.issues.map((issue) => (
                         <div
                           key={issue.id}
-                          className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200"
+                          className="rounded-xl border border-warning/20 bg-warning-soft/70 px-3 py-2 text-xs leading-relaxed text-warning"
                         >
                           {issue.message}
                         </div>
@@ -998,13 +1038,14 @@ export function DashboardView() {
         )}
 
         {tab === 'trash' && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-slate-400">{t.trashDesc}</p>
+          <div className="space-y-5">
+            <div className="panel flex flex-wrap items-center justify-between gap-4 p-5">
+              <p className="max-w-3xl text-xs leading-relaxed text-muted">{t.trashDesc}</p>
               <button
+                type="button"
                 onClick={() => void handlePurgeAll()}
                 disabled={busy || trashBatches.length === 0}
-                className="cursor-pointer rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                className="btn btn-danger shrink-0"
               >
                 {t.purgeAll}
               </button>
@@ -1014,37 +1055,39 @@ export function DashboardView() {
               {trashBatches.map((batch) => (
                 <div
                   key={batch.batchId}
-                  className="rounded-xl border border-slate-800/80 bg-[#0b1120]/90 p-4"
+                  className="panel p-5"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <span className="font-mono text-cyan-400">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm font-semibold text-accent-strong">
                         {batch.batchId.slice(0, 8)}
                       </span>
-                      <span className="text-xs font-normal text-slate-400 tabular-nums">
+                      <span className="text-xs text-muted tabular-nums">
                         · {formatTimeAgo(batch.timestamp, lang)} · {batch.items.length} ·{' '}
                         {formatBytes(batch.totalBytes)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => void handleRestoreBatch(batch.batchId)}
                         disabled={busy}
-                        className="flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/30"
+                        className="btn btn-secondary"
                       >
-                        <ArchiveRestore className="h-3.5 w-3.5" />
+                        <ArchiveRestore className="h-3.5 w-3.5 text-success" />
                         <span>{t.restoreBatch}</span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => void handlePurgeBatch(batch.batchId)}
                         disabled={busy}
-                        className="cursor-pointer rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-rose-500/40 hover:text-rose-300"
+                        className="btn btn-danger"
                       >
                         {t.purgeBatch}
                       </button>
                     </div>
                   </div>
-                  <div className="mt-2.5 max-h-28 space-y-1 overflow-y-auto text-[11px] font-mono text-slate-500">
+                  <div className="mt-4 max-h-28 space-y-1.5 overflow-y-auto border-t border-line-soft pt-3 font-mono text-[11px] text-subtle">
                     {batch.items.map((it) => (
                       <div key={it.id} className="truncate">
                         [{it.agent}] {it.originalPath} ({formatBytes(it.sizeBytes)})
@@ -1054,8 +1097,9 @@ export function DashboardView() {
                 </div>
               ))}
               {trashBatches.length === 0 && (
-                <div className="rounded-xl border border-slate-800/80 bg-[#0b1120]/60 py-12 text-center text-xs text-slate-500">
-                  {t.trashEmpty}
+                <div className="panel flex flex-col items-center px-6 py-14 text-center text-muted">
+                  <ArchiveRestore className="mb-3 h-6 w-6 text-subtle" />
+                  <span className="text-xs">{t.trashEmpty}</span>
                 </div>
               )}
             </div>
@@ -1070,33 +1114,34 @@ export function DashboardView() {
           aria-modal="true"
           aria-labelledby="confirm-permanent-title"
           onClick={() => setConfirmPermanent(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#060a13]/75 px-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4 backdrop-blur-xs"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border border-rose-500/35 bg-[#0b1120] p-6 shadow-2xl shadow-rose-950/30"
+            className="w-full max-w-md rounded-2xl border border-danger/25 bg-surface p-6 shadow-raised"
           >
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/30">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger-soft text-danger ring-1 ring-danger/15">
                 <ShieldAlert className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <h2
                   id="confirm-permanent-title"
-                  className="text-sm font-semibold text-slate-100"
+                  className="font-display text-2xl font-medium tracking-[-0.02em]"
                 >
                   {t.confirmPermanentTitle}
                 </h2>
-                <p className="mt-1.5 text-xs leading-relaxed text-slate-300">
+                <p className="mt-2 text-xs leading-relaxed text-muted">
                   {t.confirmPermanentDesc(selectedIds.size, formatBytes(selectedBytes))}
                 </p>
               </div>
             </div>
-            <div className="mt-5 flex justify-end gap-2.5">
+            <div className="mt-6 flex justify-end gap-2.5">
               <button
                 type="button"
+                autoFocus
                 onClick={() => setConfirmPermanent(false)}
-                className="cursor-pointer rounded-lg border border-slate-700 bg-slate-900 px-3.5 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-slate-500"
+                className="btn btn-secondary"
               >
                 {t.cancel}
               </button>
@@ -1106,7 +1151,7 @@ export function DashboardView() {
                   setConfirmPermanent(false);
                   void handleClean(true);
                 }}
-                className="cursor-pointer rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-500 focus-visible:outline-2 focus-visible:outline-rose-400"
+                className="btn btn-danger"
               >
                 {t.confirmDelete}
               </button>

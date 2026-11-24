@@ -52,3 +52,8 @@ const AGENT_LABELS: Record<string, string> = {
 export function agentLabel(agent: string): string {
   return AGENT_LABELS[agent] ?? agent;
 }
+
+/** Free space below 10% of the volume counts as low. */
+export function isDiskLow(disk: { totalBytes: number | null; availableBytes: number | null } | null): boolean {
+  return !!disk?.totalBytes && disk.availableBytes != null && disk.availableBytes / disk.totalBytes < 0.1;
+}

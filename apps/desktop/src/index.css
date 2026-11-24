@@ -1,17 +1,329 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  color-scheme: light;
+  --canvas: 48 33% 95%;
+  --surface: 48 50% 98%;
+  --ink: 60 3% 8%;
+  --body: 50 5% 30%;
+  --muted: 50 5% 36%;
+  --subtle: 48 5% 53%;
+  --line: 48 20% 89%;
+  --line-soft: 48 33% 93%;
+  --line-strong: 48 6% 75%;
+  --accent: 18 47% 50%;
+  --accent-strong: 16 51% 42%;
+  --accent-soft: 18 52% 93%;
+  --on-accent: 48 50% 98%;
+  --success: 103 15% 35%;
+  --success-soft: 103 22% 92%;
+  --warning: 31 49% 35%;
+  --warning-soft: 38 54% 91%;
+  --danger: 0 50% 38%;
+  --danger-soft: 0 45% 94%;
+  --focus: 207 86% 56%;
+  --agent-clay: 18 42% 55%;
+  --agent-olive: 82 18% 45%;
+  --agent-ochre: 38 48% 52%;
+  --agent-sage: 103 13% 52%;
+  --agent-taupe: 28 12% 48%;
+  --font-display-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --font-ui-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-mono-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --shadow-card: 0 1px 2px hsl(var(--ink) / 0.03), 0 0 0 1px hsl(var(--line) / 0.55);
+  --shadow-raised: 0 18px 50px hsl(var(--ink) / 0.12), 0 0 0 1px hsl(var(--line));
+  --transition-ui: 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  font-family: var(--font-ui-family);
+}
+
+@theme inline {
+  --color-canvas: hsl(var(--canvas));
+  --color-surface: hsl(var(--surface));
+  --color-ink: hsl(var(--ink));
+  --color-body: hsl(var(--body));
+  --color-muted: hsl(var(--muted));
+  --color-subtle: hsl(var(--subtle));
+  --color-line: hsl(var(--line));
+  --color-line-soft: hsl(var(--line-soft));
+  --color-line-strong: hsl(var(--line-strong));
+  --color-accent: hsl(var(--accent));
+  --color-accent-strong: hsl(var(--accent-strong));
+  --color-accent-soft: hsl(var(--accent-soft));
+  --color-on-accent: hsl(var(--on-accent));
+  --color-success: hsl(var(--success));
+  --color-success-soft: hsl(var(--success-soft));
+  --color-warning: hsl(var(--warning));
+  --color-warning-soft: hsl(var(--warning-soft));
+  --color-danger: hsl(var(--danger));
+  --color-danger-soft: hsl(var(--danger-soft));
+  --color-focus: hsl(var(--focus));
+  --color-agent-clay: hsl(var(--agent-clay));
+  --color-agent-olive: hsl(var(--agent-olive));
+  --color-agent-ochre: hsl(var(--agent-ochre));
+  --color-agent-sage: hsl(var(--agent-sage));
+  --color-agent-taupe: hsl(var(--agent-taupe));
+  --font-display: var(--font-display-family);
+  --font-sans: var(--font-ui-family);
+  --font-mono: var(--font-mono-family);
+  --radius-card: 1rem;
+  --radius-control: 0.75rem;
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
 }
 
 body {
-  background-color: #060a13;
-  color: #f1f5f9;
+  background: hsl(var(--canvas));
+  color: hsl(var(--ink));
+  font-family: var(--font-ui-family);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:not(:disabled),
+select:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:where(button, input, select):focus-visible {
+  outline: 2px solid hsl(var(--focus));
+  outline-offset: 2px;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.2);
+  color: hsl(var(--ink));
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  border: 1px solid hsl(var(--line));
+  border-radius: var(--radius-card);
+  background: hsl(var(--surface));
+  box-shadow: var(--shadow-card);
+}
+
+.btn {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    background-color var(--transition-ui),
+    border-color var(--transition-ui),
+    color var(--transition-ui),
+    box-shadow var(--transition-ui),
+    transform var(--transition-ui);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.42;
+}
+
+.btn-primary {
+  background: hsl(var(--accent-strong));
+  color: hsl(var(--on-accent));
+  box-shadow: 0 0 0 1px hsl(var(--accent-strong));
+}
+
+.btn-primary:not(:disabled):hover {
+  background: hsl(var(--accent));
+  box-shadow: 0 0 0 1px hsl(var(--accent));
+}
+
+.btn-secondary {
+  border-color: hsl(var(--line-strong) / 0.7);
+  background: hsl(var(--line));
+  color: hsl(var(--body));
+  box-shadow: 0 0 0 1px hsl(var(--line-strong) / 0.28);
+}
+
+.btn-secondary:not(:disabled):hover,
+.btn-ghost:not(:disabled):hover {
+  border-color: hsl(var(--line-strong));
+  background: hsl(var(--line-soft));
+  color: hsl(var(--ink));
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: hsl(var(--muted));
+}
+
+.btn-danger {
+  border-color: hsl(var(--danger) / 0.2);
+  background: hsl(var(--danger-soft));
+  color: hsl(var(--danger));
+}
+
+.btn-danger:not(:disabled):hover {
+  border-color: hsl(var(--danger) / 0.35);
+  background: hsl(var(--danger) / 0.12);
+}
+
+.btn-warning {
+  background: hsl(var(--warning));
+  color: hsl(var(--surface));
+  box-shadow: 0 0 0 1px hsl(var(--warning));
+}
+
+.btn-warning:not(:disabled):hover {
+  background: hsl(var(--warning) / 0.88);
+}
+
+.icon-btn {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: hsl(var(--muted));
+  transition:
+    background-color var(--transition-ui),
+    border-color var(--transition-ui),
+    color var(--transition-ui);
+}
+
+.icon-btn:not(:disabled):hover {
+  border-color: hsl(var(--line));
+  background: hsl(var(--line-soft));
+  color: hsl(var(--ink));
+}
+
+.field {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid hsl(var(--line));
+  border-radius: 10px;
+  background: hsl(var(--canvas));
+  padding: 0.4rem 0.75rem;
+  color: hsl(var(--muted));
+  font-size: 0.75rem;
+  transition:
+    border-color var(--transition-ui),
+    background-color var(--transition-ui),
+    box-shadow var(--transition-ui);
+}
+
+.field:focus-within {
+  border-color: hsl(var(--accent) / 0.65);
+  background: hsl(var(--surface));
+  box-shadow: 0 0 0 3px hsl(var(--accent) / 0.1);
+}
+
+.field input,
+.field select {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: hsl(var(--ink));
+}
+
+.field input::placeholder {
+  color: hsl(var(--subtle));
+}
+
+.field select option {
+  background: hsl(var(--surface));
+  color: hsl(var(--ink));
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.badge-rec {
+  background: hsl(var(--success-soft));
+  color: hsl(var(--success));
+}
+
+.badge-opt {
+  background: hsl(var(--warning-soft));
+  color: hsl(var(--warning));
+}
+
+.badge-exempt {
+  background: hsl(var(--line-soft));
+  color: hsl(var(--muted));
+}
+
+.checkbox {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.3rem;
+  accent-color: hsl(var(--accent-strong));
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--line-strong));
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--subtle) / 0.65);
+  background-clip: padding-box;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -22,22 +334,4 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.22);
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.42);
 }

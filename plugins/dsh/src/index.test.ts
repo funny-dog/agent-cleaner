@@ -237,8 +237,8 @@ test('DSH client bundle registers sidebar.panellist and main slots via __ModuleL
   });
   assert.deepEqual(registeredSlots.sort(), ['main', 'sidebar.panellist']);
 
-  assert.match(clientJs, /--dsw-alias-card-fill/);
-  assert.match(clientJs, /--dsw-alias-border-l2/);
+  assert.match(clientJs, /--ac-surface:\s*48 50% 98%/);
+  assert.match(clientJs, /--ac-border:\s*hsl\(48 20% 89%\)/);
   assert.match(clientJs, /body\[data-ds-dark-theme\] \.ac-dsh-root/);
   assert.match(clientJs, /color-scheme:\s*light/);
   assert.doesNotMatch(clientJs, /--dsw-alias-bg-(?:primary|secondary|tertiary)/);
@@ -459,12 +459,13 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
       assert.equal(rOverview.status, 200);
       const ovJson = (await rOverview.json()) as {
         ok: boolean;
-        data: { exemptHours: number; lang: string; scannedAt?: number; agents: { argv: string[] } };
+        data: { exemptHours: number; lang: string; scannedAt?: number; disk?: { totalBytes: number; availableBytes: number } | null; agents: { argv: string[] } };
       };
       assert.equal(ovJson.ok, true);
       assert.equal(ovJson.data.exemptHours, 48);
       assert.equal(ovJson.data.lang, 'en');
       assert.equal(typeof ovJson.data.scannedAt, 'number');
+      assert.ok(ovJson.data.disk && ovJson.data.disk.totalBytes > 0 && ovJson.data.disk.availableBytes >= 0);
       assert.deepEqual(ovJson.data.agents.argv, ['scan', '--older-than', '48h', '--lang', 'en', '--json']);
       assert.equal(await getExecCount(), 6);
 

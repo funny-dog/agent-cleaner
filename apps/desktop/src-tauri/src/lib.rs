@@ -10,6 +10,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .error_handling(ErrorHandlingMode::Result)
         .commands(collect_commands![
             commands::get_overview,
+            commands::get_disk_space,
             commands::scan,
             commands::clean,
             commands::list_trash,

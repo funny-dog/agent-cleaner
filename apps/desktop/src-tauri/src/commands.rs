@@ -283,3 +283,45 @@ pub async fn hide_tray_window(app: AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskSpace {
+    #[specta(type = f64)]
+    pub total_bytes: u64,
+    #[specta(type = f64)]
+    pub available_bytes: u64,
+}
+
+/// Disk space of the volume that holds the user's home directory.
+#[tauri::command]
+#[specta::specta]
+pub fn get_disk_space() -> Result<DiskSpace, String> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "home directory not found".to_string())?;
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|d| home.starts_with(d.mount_point()))
+        .max_by_key(|d| d.mount_point().as_os_str().len())
+        .map(|d| DiskSpace {
+            total_bytes: d.total_space(),
+            available_bytes: d.available_space(),
+        })
+        .ok_or_else(|| "disk not found".to_string())
+}
+
+#[cfg(test)]
+mod disk_space_tests {
+    use super::get_disk_space;
+
+    #[test]
+    fn reports_sane_disk_space() {
+        let d = get_disk_space().expect("disk space");
+        assert!(d.total_bytes > 0);
+        assert!(d.available_bytes <= d.total_bytes);
+    }
+}
