@@ -793,7 +793,7 @@ export function DashboardView() {
                   type="button"
                   onClick={() => void handleClean(false)}
                   disabled={busy || selectedIds.size === 0}
-                  className="btn btn-primary"
+                  className="btn btn-secondary"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span className="tabular-nums">
@@ -804,7 +804,7 @@ export function DashboardView() {
                   type="button"
                   onClick={() => setConfirmPermanent(true)}
                   disabled={busy || selectedIds.size === 0}
-                  className="btn btn-danger"
+                  className="btn btn-primary"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   <span>{t.deletePermanently}</span>

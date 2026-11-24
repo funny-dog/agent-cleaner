@@ -1613,7 +1613,7 @@ function CleanerPanel() {
               import_react.default.createElement(
                 "button",
                 {
-                  className: "ac-btn ac-btn-primary",
+                  className: "ac-btn ac-btn-ghost",
                   disabled: busy || selectedItems.length === 0,
                   onClick: () => void runAction(t.labelClean, "/agent-cleaner/api/clean", {
                     exemptHours,
@@ -1628,7 +1628,7 @@ function CleanerPanel() {
               import_react.default.createElement(
                 "button",
                 {
-                  className: "ac-btn ac-btn-danger",
+                  className: "ac-btn ac-btn-primary",
                   disabled: busy || selectedItems.length === 0,
                   onClick: () => setConfirmPermanent(true)
                 },
