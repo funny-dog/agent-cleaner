@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - feat(core,cli,mcp): add global config/whitelist (`~/.agent-cleaner/config.toml`), trash retention pruning (`restore --prune`), selective doctor repair (`doctor --fix --ids`), config backup list/restore/delete/prune, cross-agent MCP conflict detection (`conflicts`), `scan --progress-json` NDJSON streaming, and `overview` subcommand / `cleaner_overview` / `cleaner_config` / `cleaner_backups` MCP tools.
 - feat(dsh): add `/agent-cleaner/api/config`, `/backups`, `/backup-restore`, `/backup-delete`, `/backup-prune`, `/trash-prune`, `/progress` (JSON + SSE stream), `issueIds` support on `/doctor-fix`, and register 8 Cordis tools (`agent_cleaner_overview`, `agent_cleaner_config`, `agent_cleaner_backups`, etc.).
