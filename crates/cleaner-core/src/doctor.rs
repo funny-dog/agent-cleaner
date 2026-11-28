@@ -48,22 +48,22 @@ fn check_jsonc_config(path: &Path, agent: &str) -> DoctorReport {
             Ok(None) => {
                 return healthy_report(path, agent);
             }
-        Err(err) => {
-            return DoctorReport {
-                path: path_str.clone(),
-                agent: agent.to_string(),
-                issues: vec![DoctorIssue {
-                    id: format!("{agent}:parse_error"),
-                    path: path_str,
-                    severity: IssueSeverity::Error,
-                    message: format!("JSON/JSONC parse error: {err}"),
-                    auto_fixable: false,
-                    fix_target_key: None,
-                }],
-                healthy: false,
-            };
-        }
-    };
+            Err(err) => {
+                return DoctorReport {
+                    path: path_str.clone(),
+                    agent: agent.to_string(),
+                    issues: vec![DoctorIssue {
+                        id: format!("{agent}:parse_error"),
+                        path: path_str,
+                        severity: IssueSeverity::Error,
+                        message: format!("JSON/JSONC parse error: {err}"),
+                        auto_fixable: false,
+                        fix_target_key: None,
+                    }],
+                    healthy: false,
+                };
+            }
+        };
 
     let mut issues = Vec::new();
     for srv in extract_mcp_servers_from_value(&parsed) {
@@ -147,15 +147,12 @@ fn check_toml_server_table(
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_ascii_lowercase());
         let has_url = val.get("url").and_then(|v| v.as_str()).is_some();
-        let command = val
-            .get("command")
-            .and_then(|c| c.as_str())
-            .or_else(|| {
-                val.get("command")
-                    .and_then(|c| c.as_array())
-                    .and_then(|arr| arr.get(0))
-                    .and_then(|v| v.as_str())
-            });
+        let command = val.get("command").and_then(|c| c.as_str()).or_else(|| {
+            val.get("command")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.get(0))
+                .and_then(|v| v.as_str())
+        });
         let is_stdio = matches!(transport.as_deref(), Some("stdio") | Some("local"))
             || (transport.is_none() && !has_url && command.is_some());
         if is_stdio {
@@ -224,8 +221,9 @@ fn check_codex_toml(path: &Path) -> DoctorReport {
 
 fn remove_toml_mcp_servers_key(doc: &mut DocumentMut, name: &str) -> bool {
     let mut removed = false;
-    let empty_table = if let Some(servers) =
-        doc.get_mut("mcp_servers").and_then(|v| v.as_table_like_mut())
+    let empty_table = if let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(|v| v.as_table_like_mut())
     {
         if servers.remove(name).is_some() {
             removed = true;
@@ -243,8 +241,9 @@ fn remove_toml_mcp_servers_key(doc: &mut DocumentMut, name: &str) -> bool {
 fn remove_toml_nested_mcp_key(doc: &mut DocumentMut, name: &str) -> bool {
     let mut removed = false;
     if let Some(mcp_table) = doc.get_mut("mcp").and_then(|v| v.as_table_like_mut()) {
-        let remove_servers_table = if let Some(servers) =
-            mcp_table.get_mut("servers").and_then(|v| v.as_table_like_mut())
+        let remove_servers_table = if let Some(servers) = mcp_table
+            .get_mut("servers")
+            .and_then(|v| v.as_table_like_mut())
         {
             if servers.remove(name).is_some() {
                 removed = true;
@@ -388,7 +387,11 @@ fn check_dsh_yaml(path: &Path) -> DoctorReport {
     }
 }
 
-fn check_dsh_profile_package_json(profile_dir: &Path, profile_name: &str, pkg_path: &Path) -> DoctorReport {
+fn check_dsh_profile_package_json(
+    profile_dir: &Path,
+    profile_name: &str,
+    pkg_path: &Path,
+) -> DoctorReport {
     let Ok(raw) = fs::read_to_string(pkg_path) else {
         return healthy_report(pkg_path, "dsh");
     };
@@ -403,7 +406,9 @@ fn check_dsh_profile_package_json(profile_dir: &Path, profile_name: &str, pkg_pa
                     id: format!("dsh:parse_error:{profile_name}:package_json"),
                     path: path_str,
                     severity: IssueSeverity::Error,
-                    message: format!("DSH profile \"{profile_name}\" package.json parse error: {err}"),
+                    message: format!(
+                        "DSH profile \"{profile_name}\" package.json parse error: {err}"
+                    ),
                     auto_fixable: false,
                     fix_target_key: None,
                 }],
@@ -487,7 +492,11 @@ fn check_dsh_profiles(ctx: &CleanerContext) -> Vec<DoctorReport> {
         }
         let pkg_json = profile_dir.join("package.json");
         if pkg_json.is_file() {
-            reports.push(check_dsh_profile_package_json(&profile_dir, &profile_name, &pkg_json));
+            reports.push(check_dsh_profile_package_json(
+                &profile_dir,
+                &profile_name,
+                &pkg_json,
+            ));
         }
     }
     reports
@@ -692,15 +701,26 @@ pub fn run_all_doctors(ctx: &CleanerContext) -> Vec<DoctorReport> {
 }
 
 pub fn fix_all_doctors(ctx: &CleanerContext) -> Result<DoctorFixReport> {
+    fix_doctor_issues(ctx, None)
+}
+
+pub fn fix_doctor_issues(
+    ctx: &CleanerContext,
+    issue_ids: Option<&[String]>,
+) -> Result<DoctorFixReport> {
     let initial = run_all_doctors(ctx);
     let mut fixed_count = 0usize;
     let mut backup_paths = Vec::new();
+    let id_filter: Option<HashSet<&str>> = issue_ids
+        .filter(|ids| !ids.is_empty())
+        .map(|ids| ids.iter().map(|s| s.as_str()).collect());
 
     for report in &initial {
         let mut keys: Vec<String> = report
             .issues
             .iter()
             .filter(|i| i.auto_fixable)
+            .filter(|i| id_filter.as_ref().is_none_or(|f| f.contains(i.id.as_str())))
             .filter_map(|i| i.fix_target_key.clone())
             .collect();
         keys.sort();
@@ -739,6 +759,13 @@ pub fn fix_all_doctors(ctx: &CleanerContext) -> Result<DoctorFixReport> {
             0
         };
         fixed_count += fixed;
+    }
+
+    if fixed_count > 0 {
+        let cfg = crate::config::load_config(ctx);
+        if cfg.backup_max_count > 0 {
+            let _ = trash::prune_backups(ctx, cfg.backup_max_count as usize);
+        }
     }
 
     let reports = run_all_doctors(ctx);

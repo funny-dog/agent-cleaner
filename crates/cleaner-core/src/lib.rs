@@ -1,3 +1,4 @@
+pub mod config;
 pub mod doctor;
 pub mod fs_safe;
 pub mod mcp_auditor;
@@ -8,9 +9,7 @@ pub mod targets;
 pub mod trash;
 pub mod types;
 
-use types::{
-    CleanRecommendation, CleanerContext, OverviewReport, OverviewSummary, ScanOptions,
-};
+use types::{CleanRecommendation, CleanerContext, OverviewReport, OverviewSummary, ScanOptions};
 
 pub fn get_overview(ctx: &CleanerContext, options: &ScanOptions) -> OverviewReport {
     let agents = scanner::scan_all(ctx, options);

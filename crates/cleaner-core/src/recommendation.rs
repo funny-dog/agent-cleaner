@@ -37,9 +37,9 @@ pub fn evaluate_recommendation(
                 Language::Zh => {
                     format!("{exempt_hours} 小时内有活跃修改，默认受保护免于误清理")
                 }
-                Language::En => format!(
-                    "Modified within {exempt_hours}h; protected by active session guard"
-                ),
+                Language::En => {
+                    format!("Modified within {exempt_hours}h; protected by active session guard")
+                }
             },
         ),
         ScanCategory::OrphanSession => (

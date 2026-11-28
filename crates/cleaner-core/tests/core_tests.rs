@@ -1,9 +1,10 @@
-use cleaner_core::doctor::{fix_all_doctors, run_all_doctors};
-use cleaner_core::fs_safe::assert_safe_child;
+use cleaner_core::config::{add_ignored_path, load_config, save_config};
+use cleaner_core::doctor::{fix_all_doctors, fix_doctor_issues, run_all_doctors};
+use cleaner_core::fs_safe::{assert_safe_child, extract_external_mountpoint};
 use cleaner_core::mcp_auditor::audit_mcp;
 use cleaner_core::mcp_server::handle_rpc_line;
-use cleaner_core::scanner::{clean, scan_all};
-use cleaner_core::trash::{list_batches, purge_batch, restore_batch};
+use cleaner_core::scanner::{clean, scan_all, scan_all_with_progress};
+use cleaner_core::trash::{list_backups, list_batches, purge_batch, restore_backup, restore_batch};
 use cleaner_core::types::{
     CleanOptions, CleanRecommendation, CleanerContext, Language, ScanCategory, ScanOptions,
 };
@@ -80,7 +81,9 @@ fn test_claude_hyphen_protection_and_unmounted_guard() {
     let claude_res = &results[0];
     assert_eq!(claude_res.items.len(), 1);
     assert_eq!(claude_res.items[0].category, ScanCategory::OrphanSession);
-    assert!(claude_res.items[0].path.ends_with("-Users-me-codes-deleted-project"));
+    assert!(claude_res.items[0]
+        .path
+        .ends_with("-Users-me-codes-deleted-project"));
 }
 
 #[test]
@@ -97,7 +100,11 @@ fn test_dsh_undeclared_modules_and_clean_restore_roundtrip() {
     fs::write(profile.join("node_modules/orphan-pkg/index.js"), "dead").unwrap();
 
     fs::create_dir_all(profile.join("node_modules/@scope/orphan-scoped")).unwrap();
-    fs::write(profile.join("node_modules/@scope/orphan-scoped/index.js"), "dead").unwrap();
+    fs::write(
+        profile.join("node_modules/@scope/orphan-scoped/index.js"),
+        "dead",
+    )
+    .unwrap();
 
     fs::write(
         profile.join("package.json"),
@@ -113,7 +120,10 @@ fn test_dsh_undeclared_modules_and_clean_restore_roundtrip() {
     let results = scan_all(&ctx, &ScanOptions::default());
     let dsh = results.iter().find(|r| r.agent == "dsh").unwrap();
     assert_eq!(dsh.items.len(), 2);
-    assert!(dsh.items.iter().all(|i| i.category == ScanCategory::NodeModules));
+    assert!(dsh
+        .items
+        .iter()
+        .all(|i| i.category == ScanCategory::NodeModules));
 
     // Clean only recommended items (the 2 orphan DSH modules + opencode log)
     let report = clean(
@@ -278,22 +288,29 @@ fn test_mcp_server_jsonrpc_protocol() {
     let list_resp: serde_json::Value =
         serde_json::from_str(&handle_rpc_line(&ctx, &list_req).unwrap()).unwrap();
     let tools = list_resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 8);
 
     // Notification has no id -> no reply
     let notif = json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string();
     assert!(handle_rpc_line(&ctx, &notif).is_none());
 
-    let call_req = json!({
-        "jsonrpc":"2.0",
-        "id":3,
-        "method":"tools/call",
-        "params":{"name":"cleaner_scan","arguments":{}}
-    })
-    .to_string();
-    let call_resp: serde_json::Value =
-        serde_json::from_str(&handle_rpc_line(&ctx, &call_req).unwrap()).unwrap();
-    assert!(call_resp["result"]["content"][0]["text"].is_string());
+    for (id, tool_name, arguments) in [
+        (3, "cleaner_scan", json!({})),
+        (4, "cleaner_overview", json!({})),
+        (5, "cleaner_config", json!({"action": "get"})),
+        (6, "cleaner_backups", json!({"action": "list"})),
+    ] {
+        let call_req = json!({
+            "jsonrpc":"2.0",
+            "id":id,
+            "method":"tools/call",
+            "params":{"name":tool_name,"arguments":arguments}
+        })
+        .to_string();
+        let call_resp: serde_json::Value =
+            serde_json::from_str(&handle_rpc_line(&ctx, &call_req).unwrap()).unwrap();
+        assert!(call_resp["result"]["content"][0]["text"].is_string());
+    }
 }
 
 #[test]
@@ -341,7 +358,11 @@ fn test_dynamic_discovery_custom_rules_and_mcp_doctor() {
     // 2. Unknown AI agent with marker (mcp.json + skills/) + safe logs + sensitive credentials
     fs::create_dir_all(home.join(".novacode/skills")).unwrap();
     fs::write(home.join(".novacode/skills/review.md"), "# skill").unwrap();
-    fs::write(home.join(".novacode/credentials.json"), "{\"token\":\"secret\"}").unwrap();
+    fs::write(
+        home.join(".novacode/credentials.json"),
+        "{\"token\":\"secret\"}",
+    )
+    .unwrap();
     fs::create_dir_all(home.join(".novacode/logs")).unwrap();
     fs::write(home.join(".novacode/logs/agent.log"), "nova log").unwrap();
     fs::write(
@@ -434,11 +455,19 @@ fn test_dsh_deep_scan_transitive_deps_sessions_and_doctor() {
     fs::create_dir_all(profile.join("node_modules/transitive-pkg")).unwrap();
     fs::write(profile.join("node_modules/transitive-pkg/index.js"), "ok").unwrap();
     fs::create_dir_all(profile.join("node_modules/@scope/hoisted-pkg")).unwrap();
-    fs::write(profile.join("node_modules/@scope/hoisted-pkg/index.js"), "ok").unwrap();
+    fs::write(
+        profile.join("node_modules/@scope/hoisted-pkg/index.js"),
+        "ok",
+    )
+    .unwrap();
     fs::create_dir_all(profile.join("node_modules/injected-pkg")).unwrap();
     fs::write(profile.join("node_modules/injected-pkg/index.js"), "ok").unwrap();
     fs::create_dir_all(profile.join("node_modules/truly-orphan-pkg")).unwrap();
-    fs::write(profile.join("node_modules/truly-orphan-pkg/index.js"), "dead").unwrap();
+    fs::write(
+        profile.join("node_modules/truly-orphan-pkg/index.js"),
+        "dead",
+    )
+    .unwrap();
 
     fs::write(
         profile.join("node_modules/.modules.yaml"),
@@ -478,7 +507,8 @@ hoistedLocations:
     .unwrap();
 
     // 2. DSH Desktop Webview cache
-    let desktop_code_cache = home.join("Library/Application Support/@deepseek-ai/dsh-desktop/Code Cache");
+    let desktop_code_cache =
+        home.join("Library/Application Support/@deepseek-ai/dsh-desktop/Code Cache");
     fs::create_dir_all(&desktop_code_cache).unwrap();
     fs::write(desktop_code_cache.join("data_0"), "cached-bytecode").unwrap();
 
@@ -524,7 +554,8 @@ hoistedLocations:
     )
     .unwrap();
 
-    let unmounted_sess_dir = home.join(".dsh/sessions/--Volumes-DefinitelyUnmountedDrive_XYZ-app--");
+    let unmounted_sess_dir =
+        home.join(".dsh/sessions/--Volumes-DefinitelyUnmountedDrive_XYZ-app--");
     fs::create_dir_all(unmounted_sess_dir.join("session-ext-1")).unwrap();
     fs::write(
         unmounted_sess_dir.join("session-ext-1/session.v4.jsonl.zstd"),
@@ -588,7 +619,9 @@ hoistedLocations:
 
     // Active session and unmounted external drive sessions MUST NOT be flagged
     assert!(!paths.iter().any(|p| p.ends_with("session-active-1")));
-    assert!(!paths.iter().any(|p| p.contains("DefinitelyUnmountedDrive_XYZ")));
+    assert!(!paths
+        .iter()
+        .any(|p| p.contains("DefinitelyUnmountedDrive_XYZ")));
 
     // Doctor checks DSH profile cordis.patch.yml + package.json missing bundle and auto-heals it
     let doctors = run_all_doctors(&ctx);
@@ -598,7 +631,9 @@ hoistedLocations:
         .expect("DSH profile package.json should be inspected by doctor");
     assert!(!pkg_report.healthy);
     assert_eq!(pkg_report.issues.len(), 1);
-    assert!(pkg_report.issues[0].message.contains("missing-bundle-plugin"));
+    assert!(pkg_report.issues[0]
+        .message
+        .contains("missing-bundle-plugin"));
 
     let fix = fix_all_doctors(&ctx).unwrap();
     assert_eq!(fix.fixed_count, 1);
@@ -645,28 +680,67 @@ fn test_brand_variants_claude_versions_and_lima_snapshots() {
     fs::write(home.join(".claude.json.backup"), "{}").unwrap();
 
     let ctx = old_ctx(home);
-    let results = scan_all(&ctx, &ScanOptions { lang: Some(Language::En), ..Default::default() });
+    let results = scan_all(
+        &ctx,
+        &ScanOptions {
+            lang: Some(Language::En),
+            ..Default::default()
+        },
+    );
 
     let qoder = results.iter().find(|r| r.agent == "qoder").unwrap();
-    assert!(qoder.items.iter().any(|i| i.path.ends_with(".qoder-cn/logs")));
+    assert!(qoder
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".qoder-cn/logs")));
 
     let wb = results.iter().find(|r| r.agent == "workbuddy").unwrap();
-    assert!(wb.items.iter().any(|i| i.path.ends_with(".workbuddy-ai/logs")));
+    assert!(wb
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".workbuddy-ai/logs")));
 
     let kimi = results.iter().find(|r| r.agent == "kimi").unwrap();
-    assert!(kimi.items.iter().any(|i| i.path.ends_with(".kimi-code/sessions")));
-    assert!(kimi.items.iter().any(|i| i.path.ends_with(".kimi-code/search-index")));
+    assert!(kimi
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".kimi-code/sessions")));
+    assert!(kimi
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".kimi-code/search-index")));
 
     let claude = results.iter().find(|r| r.agent == "claude").unwrap();
-    assert!(claude.items.iter().any(|i| i.path.ends_with("Claude-wb-cn-3p/Code Cache")));
-    assert!(claude.items.iter().any(|i| i.path.ends_with("claude-code/2.1.317") && i.category == ScanCategory::Updater));
-    assert!(!claude.items.iter().any(|i| i.path.ends_with("claude-code/2.1.321")));
-    assert!(!claude.items.iter().any(|i| i.path.ends_with("lima/_config")));
-    let base_vm = claude.items.iter().find(|i| i.path.ends_with("lima/base")).unwrap();
+    assert!(claude
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("Claude-wb-cn-3p/Code Cache")));
+    assert!(claude
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("claude-code/2.1.317") && i.category == ScanCategory::Updater));
+    assert!(!claude
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("claude-code/2.1.321")));
+    assert!(!claude
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("lima/_config")));
+    let base_vm = claude
+        .items
+        .iter()
+        .find(|i| i.path.ends_with("lima/base"))
+        .unwrap();
     assert_eq!(base_vm.category, ScanCategory::Snapshot);
     assert_eq!(base_vm.recommendation, CleanRecommendation::Optional);
-    assert!(claude.items.iter().any(|i| i.path.ends_with(".claude-cage/state/lima/claude-cage-workspace-1")));
-    assert!(claude.items.iter().any(|i| i.path.ends_with(".claude.json.backup") && i.category == ScanCategory::Backup));
+    assert!(claude.items.iter().any(|i| i
+        .path
+        .ends_with(".claude-cage/state/lima/claude-cage-workspace-1")));
+    assert!(claude
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".claude.json.backup") && i.category == ScanCategory::Backup));
 }
 
 #[test]
@@ -680,13 +754,26 @@ fn test_high_usage_subdirs_and_library_logs() {
     fs::create_dir_all(home.join(".gemini/antigravity/scratch")).unwrap();
     fs::write(home.join(".gemini/antigravity/scratch/tmp.txt"), "scratch").unwrap();
     fs::create_dir_all(home.join(".gemini/antigravity/brain/conv-1")).unwrap();
-    fs::write(home.join(".gemini/antigravity/brain/conv-1/note.md"), "brain").unwrap();
+    fs::write(
+        home.join(".gemini/antigravity/brain/conv-1/note.md"),
+        "brain",
+    )
+    .unwrap();
     fs::create_dir_all(home.join(".gemini/antigravity/conversations")).unwrap();
     fs::write(home.join(".gemini/antigravity/conversations/c1.db"), "db").unwrap();
     fs::create_dir_all(home.join(".gemini/antigravity-cli/brain/conv-2")).unwrap();
-    fs::write(home.join(".gemini/antigravity-cli/brain/conv-2/note.md"), "cli brain").unwrap();
-    fs::create_dir_all(home.join(".gemini/antigravity-browser-profile/Default/Code Cache")).unwrap();
-    fs::write(home.join(".gemini/antigravity-browser-profile/Default/Code Cache/js"), "js").unwrap();
+    fs::write(
+        home.join(".gemini/antigravity-cli/brain/conv-2/note.md"),
+        "cli brain",
+    )
+    .unwrap();
+    fs::create_dir_all(home.join(".gemini/antigravity-browser-profile/Default/Code Cache"))
+        .unwrap();
+    fs::write(
+        home.join(".gemini/antigravity-browser-profile/Default/Code Cache/js"),
+        "js",
+    )
+    .unwrap();
     fs::create_dir_all(home.join("Library/Logs/Antigravity")).unwrap();
     fs::write(home.join("Library/Logs/Antigravity/main.log"), "ag mac log").unwrap();
 
@@ -696,36 +783,88 @@ fn test_high_usage_subdirs_and_library_logs() {
     fs::create_dir_all(home.join(".codex")).unwrap();
     fs::write(home.join(".codex/logs_2.sqlite"), "sqlite").unwrap();
     fs::create_dir_all(home.join("Library/Logs/com.openai.codex")).unwrap();
-    fs::write(home.join("Library/Logs/com.openai.codex/codex.log"), "codex log").unwrap();
+    fs::write(
+        home.join("Library/Logs/com.openai.codex/codex.log"),
+        "codex log",
+    )
+    .unwrap();
     fs::create_dir_all(home.join(".opencode/logs")).unwrap();
     fs::write(home.join(".opencode/logs/opencode.log"), "oc log").unwrap();
     fs::create_dir_all(home.join("Library/Logs/DeepSeek Harness")).unwrap();
-    fs::write(home.join("Library/Logs/DeepSeek Harness/dsh.log"), "dsh log").unwrap();
+    fs::write(
+        home.join("Library/Logs/DeepSeek Harness/dsh.log"),
+        "dsh log",
+    )
+    .unwrap();
 
     let ctx = old_ctx(home);
-    let results = scan_all(&ctx, &ScanOptions { lang: Some(Language::En), ..Default::default() });
+    let results = scan_all(
+        &ctx,
+        &ScanOptions {
+            lang: Some(Language::En),
+            ..Default::default()
+        },
+    );
 
     let gemini = results.iter().find(|r| r.agent == "gemini").unwrap();
-    assert!(gemini.items.iter().any(|i| i.path.ends_with(".gemini/antigravity/log")));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with(".gemini/antigravity/scratch")));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with(".gemini/antigravity/brain") && i.recommendation == CleanRecommendation::Optional));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with(".gemini/antigravity/conversations") && i.recommendation == CleanRecommendation::Optional));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with(".gemini/antigravity-cli/brain")));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with("Default/Code Cache")));
-    assert!(gemini.items.iter().any(|i| i.path.ends_with("Library/Logs/Antigravity")));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".gemini/antigravity/log")));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".gemini/antigravity/scratch")));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".gemini/antigravity/brain")
+            && i.recommendation == CleanRecommendation::Optional));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".gemini/antigravity/conversations")
+            && i.recommendation == CleanRecommendation::Optional));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".gemini/antigravity-cli/brain")));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("Default/Code Cache")));
+    assert!(gemini
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("Library/Logs/Antigravity")));
 
     let zcode = results.iter().find(|r| r.agent == "zcode").unwrap();
-    assert!(zcode.items.iter().any(|i| i.path.ends_with(".zcode/cli/rollout")));
+    assert!(zcode
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".zcode/cli/rollout")));
 
     let codex = results.iter().find(|r| r.agent == "codex").unwrap();
-    assert!(codex.items.iter().any(|i| i.path.ends_with(".codex/logs_2.sqlite")));
-    assert!(codex.items.iter().any(|i| i.path.ends_with("Library/Logs/com.openai.codex")));
+    assert!(codex
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".codex/logs_2.sqlite")));
+    assert!(codex
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("Library/Logs/com.openai.codex")));
 
     let opencode = results.iter().find(|r| r.agent == "opencode").unwrap();
-    assert!(opencode.items.iter().any(|i| i.path.ends_with(".opencode/logs")));
+    assert!(opencode
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".opencode/logs")));
 
     let dsh = results.iter().find(|r| r.agent == "dsh").unwrap();
-    assert!(dsh.items.iter().any(|i| i.path.ends_with("Library/Logs/DeepSeek Harness")));
+    assert!(dsh
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("Library/Logs/DeepSeek Harness")));
 }
 
 #[test]
@@ -735,14 +874,22 @@ fn test_uv_bucketed_cold_cache_and_xdg_cache_library_logs_discovery() {
 
     // 1. uv bucketed cache + .tmp* + empty .tmp*
     fs::create_dir_all(home.join(".cache/uv/archive-v0/pkg-hash-1")).unwrap();
-    fs::write(home.join(".cache/uv/archive-v0/pkg-hash-1/data.whl"), "wheel bytes").unwrap();
+    fs::write(
+        home.join(".cache/uv/archive-v0/pkg-hash-1/data.whl"),
+        "wheel bytes",
+    )
+    .unwrap();
     fs::create_dir_all(home.join(".cache/uv/.tmp14EAgl")).unwrap();
     fs::write(home.join(".cache/uv/.tmp14EAgl/part"), "partial").unwrap();
     fs::create_dir_all(home.join(".cache/uv/.tmpEmpty")).unwrap();
 
     // 2. Puppeteer browser cache (should be claimed by pkg-cache, not unknown discovery)
     fs::create_dir_all(home.join(".cache/puppeteer/chrome/mac_arm-156")).unwrap();
-    fs::write(home.join(".cache/puppeteer/chrome/mac_arm-156/chrome"), "browser").unwrap();
+    fs::write(
+        home.join(".cache/puppeteer/chrome/mac_arm-156/chrome"),
+        "browser",
+    )
+    .unwrap();
 
     // 3. Unknown agent caches under ~/.cache and ~/Library/Logs, plus root .log file
     fs::create_dir_all(home.join(".cache/oh-my-opencode/bin")).unwrap();
@@ -753,15 +900,35 @@ fn test_uv_bucketed_cold_cache_and_xdg_cache_library_logs_discovery() {
     fs::write(home.join(".myagent/daemon.log"), "daemon log").unwrap();
 
     let ctx = old_ctx(home);
-    let results = scan_all(&ctx, &ScanOptions { lang: Some(Language::En), ..Default::default() });
+    let results = scan_all(
+        &ctx,
+        &ScanOptions {
+            lang: Some(Language::En),
+            ..Default::default()
+        },
+    );
 
     let pkg_cache = results.iter().find(|r| r.agent == "pkg-cache").unwrap();
-    assert!(pkg_cache.items.iter().any(|i| i.path.ends_with("archive-v0/pkg-hash-1") && i.category == ScanCategory::ColdCache));
-    assert!(pkg_cache.items.iter().any(|i| i.path.ends_with(".tmp14EAgl") && i.category == ScanCategory::Tmp));
-    assert!(!pkg_cache.items.iter().any(|i| i.path.ends_with(".tmpEmpty")));
-    assert!(pkg_cache.items.iter().any(|i| i.path.ends_with("chrome/mac_arm-156") && i.category == ScanCategory::ColdCache));
+    assert!(pkg_cache.items.iter().any(
+        |i| i.path.ends_with("archive-v0/pkg-hash-1") && i.category == ScanCategory::ColdCache
+    ));
+    assert!(pkg_cache
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".tmp14EAgl") && i.category == ScanCategory::Tmp));
+    assert!(!pkg_cache
+        .items
+        .iter()
+        .any(|i| i.path.ends_with(".tmpEmpty")));
+    assert!(pkg_cache
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("chrome/mac_arm-156") && i.category == ScanCategory::ColdCache));
 
-    let omo = results.iter().find(|r| r.agent == "oh-my-opencode").unwrap();
+    let omo = results
+        .iter()
+        .find(|r| r.agent == "oh-my-opencode")
+        .unwrap();
     assert_eq!(omo.items.len(), 1);
     assert_eq!(omo.items[0].category, ScanCategory::Cache);
     assert_eq!(omo.items[0].recommendation, CleanRecommendation::Optional);
@@ -769,10 +936,16 @@ fn test_uv_bucketed_cold_cache_and_xdg_cache_library_logs_discovery() {
     let superagent = results.iter().find(|r| r.agent == "superagent").unwrap();
     assert_eq!(superagent.items.len(), 1);
     assert_eq!(superagent.items[0].category, ScanCategory::Log);
-    assert_eq!(superagent.items[0].recommendation, CleanRecommendation::Optional);
+    assert_eq!(
+        superagent.items[0].recommendation,
+        CleanRecommendation::Optional
+    );
 
     let myagent = results.iter().find(|r| r.agent == "myagent").unwrap();
-    assert!(myagent.items.iter().any(|i| i.path.ends_with("daemon.log") && i.category == ScanCategory::Log));
+    assert!(myagent
+        .items
+        .iter()
+        .any(|i| i.path.ends_with("daemon.log") && i.category == ScanCategory::Log));
 }
 
 #[test]
@@ -799,7 +972,8 @@ command = "/nonexistent/codex_mcp_xyz"
     .unwrap();
 
     // 2. Claude Desktop claude_desktop_config.json
-    let desktop_cfg = home.join("Library/Application Support/Claude-qoder-cn-3p/claude_desktop_config.json");
+    let desktop_cfg =
+        home.join("Library/Application Support/Claude-qoder-cn-3p/claude_desktop_config.json");
     fs::create_dir_all(desktop_cfg.parent().unwrap()).unwrap();
     fs::write(
         &desktop_cfg,
@@ -941,4 +1115,190 @@ fn test_permanent_clean_bypasses_trash() {
     assert!(report.errors.is_empty());
     assert!(!log_dir.exists() && !log_file.exists());
     assert!(list_batches(&ctx).is_empty());
+}
+
+#[test]
+fn test_config_ignore_whitelist_and_progress_callback() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    let claude_debug = home.join(".claude/debug");
+    let claude_paste = home.join(".claude/paste-cache");
+    fs::create_dir_all(&claude_debug).unwrap();
+    fs::create_dir_all(&claude_paste).unwrap();
+    fs::write(claude_debug.join("a.log"), "debug").unwrap();
+    fs::write(claude_paste.join("b.txt"), "paste").unwrap();
+
+    // Ignore debug directory & hide opencode agent entirely
+    let ctx = old_ctx(home);
+    fs::create_dir_all(home.join(".local/share/opencode/log")).unwrap();
+    fs::write(home.join(".local/share/opencode/log/app.log"), "ignored").unwrap();
+
+    add_ignored_path(&ctx, "~/.claude/debug").unwrap();
+    let mut cfg = load_config(&ctx);
+    cfg.ignored_agents = vec!["opencode".to_string()];
+    save_config(&ctx, &cfg).unwrap();
+
+    let mut progress_events = Vec::new();
+    let results = scan_all_with_progress(&ctx, &ScanOptions::default(), |p| {
+        progress_events.push(p);
+    });
+    assert!(!progress_events.is_empty());
+    assert!(progress_events.iter().all(|p| p.total >= p.completed));
+    assert!(!results.iter().any(|r| r.agent == "opencode"));
+
+    let claude = results.iter().find(|r| r.agent == "claude").unwrap();
+    let debug_item = claude
+        .items
+        .iter()
+        .find(|i| i.path.ends_with("debug"))
+        .unwrap();
+    assert_eq!(debug_item.recommendation, CleanRecommendation::Exempt);
+    let paste_item = claude
+        .items
+        .iter()
+        .find(|i| i.path.ends_with("paste-cache"))
+        .unwrap();
+    assert_eq!(paste_item.recommendation, CleanRecommendation::Recommended);
+}
+
+#[test]
+fn test_selective_doctor_fix_backup_restore_and_mcp_conflicts() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let claude_cfg = home.join(".claude/settings.json");
+    fs::write(
+        &claude_cfg,
+        r#"{
+  "mcpServers": {
+    "dead_one": { "command": "nonexistent_cmd_alpha_111" },
+    "dead_two": { "command": "nonexistent_cmd_beta_222" },
+    "shared_srv": { "command": "sh", "args": ["-c", "echo claude"] }
+  }
+}"#,
+    )
+    .unwrap();
+
+    fs::create_dir_all(home.join(".cursor")).unwrap();
+    fs::write(
+        home.join(".cursor/mcp.json"),
+        r#"{
+  "mcpServers": {
+    "shared_srv": { "command": "sh", "args": ["-c", "echo cursor"] }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let ctx = old_ctx(home);
+    let mcp = audit_mcp(&ctx);
+    assert_eq!(mcp.conflicts.len(), 1);
+    assert_eq!(mcp.conflicts[0].len(), 2);
+
+    // Fix only dead_one, leaving dead_two intact
+    let fix = fix_doctor_issues(&ctx, Some(&["claude:dead_mcp:dead_one".to_string()])).unwrap();
+    assert_eq!(fix.fixed_count, 1);
+    let after_partial = fs::read_to_string(&claude_cfg).unwrap();
+    assert!(!after_partial.contains("dead_one"));
+    assert!(after_partial.contains("dead_two"));
+
+    // Restore from backup and confirm dead_one returns
+    let backups = list_backups(&ctx);
+    assert_eq!(backups.len(), 1);
+    let restore_rep = restore_backup(&ctx, &backups[0].id).unwrap();
+    assert!(restore_rep.restored);
+    assert!(fs::read_to_string(&claude_cfg)
+        .unwrap()
+        .contains("dead_one"));
+}
+
+#[test]
+fn test_cross_platform_paths_and_mountpoints() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    // Windows AppData Cursor cache & Linux XDG Zed cache
+    let win_cursor_cache = home.join("AppData/Roaming/Cursor/Cache");
+    fs::create_dir_all(&win_cursor_cache).unwrap();
+    fs::write(win_cursor_cache.join("data_0"), "win-cache").unwrap();
+
+    let linux_zed_cache = home.join(".cache/Zed");
+    fs::create_dir_all(&linux_zed_cache).unwrap();
+    fs::write(linux_zed_cache.join("shader.bin"), "linux-cache").unwrap();
+
+    let ctx = old_ctx(home);
+    let results = scan_all(&ctx, &ScanOptions::default());
+    assert!(results
+        .iter()
+        .any(|r| r.agent == "cursor" && !r.items.is_empty()));
+    assert!(results
+        .iter()
+        .any(|r| r.agent == "zed" && !r.items.is_empty()));
+
+    assert_eq!(
+        extract_external_mountpoint(Path::new("/run/media/alice/SSD/proj"))
+            .unwrap()
+            .to_string_lossy(),
+        "/run/media/alice/SSD"
+    );
+    assert_eq!(
+        extract_external_mountpoint(Path::new("E:\\Projects\\app"))
+            .unwrap()
+            .to_string_lossy(),
+        "E:\\"
+    );
+}
+
+#[test]
+fn test_windows_appdata_mcp_and_agent_discovery() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path();
+
+    // Windows AppData/Roaming dynamic MCP configs: Claude Desktop, Cursor User/mcp.json, and Cline extension
+    let claude_desktop = home.join("AppData/Roaming/Claude/claude_desktop_config.json");
+    fs::create_dir_all(claude_desktop.parent().unwrap()).unwrap();
+    fs::write(
+        &claude_desktop,
+        r#"{"mcpServers":{"dead_win_claude":{"command":"nonexistent_win_cmd_1"}}}"#,
+    )
+    .unwrap();
+
+    let cursor_user_mcp = home.join("AppData/Roaming/Cursor/User/mcp.json");
+    fs::create_dir_all(cursor_user_mcp.parent().unwrap()).unwrap();
+    fs::write(
+        &cursor_user_mcp,
+        r#"{"mcpServers":{"dead_win_cursor":{"command":"nonexistent_win_cmd_2"}}}"#,
+    )
+    .unwrap();
+
+    let cline_mcp = home.join(
+        "AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+    );
+    fs::create_dir_all(cline_mcp.parent().unwrap()).unwrap();
+    fs::write(
+        &cline_mcp,
+        r#"{"mcpServers":{"dead_win_cline":{"command":"nonexistent_win_cmd_3"}}}"#,
+    )
+    .unwrap();
+
+    // Windows AppData/Roaming unknown agent directory
+    let custom_agent_logs = home.join("AppData/Roaming/MyCustomAgent/logs");
+    fs::create_dir_all(&custom_agent_logs).unwrap();
+    fs::write(custom_agent_logs.join("agent.log"), "windows log").unwrap();
+
+    let ctx = old_ctx(home);
+    let mcp = audit_mcp(&ctx);
+    let dead_names: Vec<&str> = mcp.dead_links.iter().map(|e| e.name.as_str()).collect();
+    assert!(dead_names.contains(&"dead_win_claude"));
+    assert!(dead_names.contains(&"dead_win_cursor"));
+    assert!(dead_names.contains(&"dead_win_cline"));
+
+    let results = scan_all(&ctx, &ScanOptions::default());
+    let custom = results
+        .iter()
+        .find(|r| r.agent == "mycustomagent")
+        .expect("expected unknown AppData/Roaming agent to be discovered");
+    assert!(custom.items.iter().any(|i| i.path.ends_with("logs")));
 }

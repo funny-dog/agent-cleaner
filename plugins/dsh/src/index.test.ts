@@ -7,8 +7,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { gzipSync } from 'node:zlib';
-import { apply, ensureBinaryPath, findExistingBinaryPath, PLUGIN_VERSION } from './index.js';
+import { deflateRawSync, gzipSync } from 'node:zlib';
+import {
+  apply,
+  ensureBinaryPath,
+  extractBinaryFromZip,
+  findExistingBinaryPath,
+  PLUGIN_VERSION,
+  resolveReleaseAssetName,
+} from './index.js';
 import {
   COMMAND_TEMPLATES,
   detectPlatforms,
@@ -44,7 +51,7 @@ function createTarGz(fileName: string, content: Buffer): Buffer {
   return gzipSync(Buffer.concat([header, body, trailer]));
 }
 
-test('DSH plugin registers all 5 headless tools and invokes binary with --json', async () => {
+test('DSH plugin registers all 8 headless tools and invokes binary with --json', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-plugin-test-'));
   const stubBin = path.join(tmpDir, 'mock-ac.mjs');
   await fs.writeFile(
@@ -72,22 +79,41 @@ test('DSH plugin registers all 5 headless tools and invokes binary with --json',
   assert.deepEqual(
     [...registered.keys()].sort(),
     [
+      'agent_cleaner_backups',
       'agent_cleaner_clean',
+      'agent_cleaner_config',
       'agent_cleaner_doctor',
       'agent_cleaner_mcp',
+      'agent_cleaner_overview',
       'agent_cleaner_restore',
       'agent_cleaner_scan',
     ],
   );
 
-  const scanRes = (await registered.get('agent_cleaner_scan').execute({ agent: 'claude' })) as {
+  const overviewRes = (await registered
+    .get('agent_cleaner_overview')
+    .execute({ olderThanHours: 48, lang: 'en' })) as { argv: string[] };
+  assert.deepEqual(overviewRes.argv, ['overview', '--older-than', '48h', '--lang', 'en', '--json']);
+
+  const scanRes = (await registered
+    .get('agent_cleaner_scan')
+    .execute({ agent: 'claude', lang: 'zh' })) as {
     argv: string[];
   };
-  assert.deepEqual(scanRes.argv, ['scan', '--older-than', '12h', '--agent', 'claude', '--json']);
+  assert.deepEqual(scanRes.argv, [
+    'scan',
+    '--older-than',
+    '12h',
+    '--agent',
+    'claude',
+    '--lang',
+    'zh',
+    '--json',
+  ]);
 
   const cleanRes = (await registered
     .get('agent_cleaner_clean')
-    .execute({ onlyRecommended: true, dryRun: true, selectedIds: ['id1', 'id2'] })) as {
+    .execute({ onlyRecommended: true, dryRun: true, permanent: true, selectedIds: ['id1', 'id2'] })) as {
     argv: string[];
   };
   assert.deepEqual(cleanRes.argv, [
@@ -97,6 +123,7 @@ test('DSH plugin registers all 5 headless tools and invokes binary with --json',
     '12h',
     '--only-recommended',
     '--dry-run',
+    '--permanent',
     '--ids',
     'id1,id2',
     '--json',
@@ -106,6 +133,17 @@ test('DSH plugin registers all 5 headless tools and invokes binary with --json',
     argv: string[];
   };
   assert.deepEqual(doctorRes.argv, ['doctor', '--fix', '--json']);
+
+  const doctorSelectiveRes = (await registered
+    .get('agent_cleaner_doctor')
+    .execute({ issueIds: ['claude:dead_mcp:foo', 'codex:dead_mcp:bar'] })) as { argv: string[] };
+  assert.deepEqual(doctorSelectiveRes.argv, [
+    'doctor',
+    '--fix',
+    '--ids',
+    'claude:dead_mcp:foo,codex:dead_mcp:bar',
+    '--json',
+  ]);
 
   const mcpRes = (await registered.get('agent_cleaner_mcp').execute({ kill: true, pid: 12345 })) as {
     argv: string[];
@@ -131,6 +169,53 @@ test('DSH plugin registers all 5 headless tools and invokes binary with --json',
     .get('agent_cleaner_restore')
     .execute({ purgeAll: true })) as { argv: string[] };
   assert.deepEqual(purgeAllRes.argv, ['restore', '--purge-all', '--json']);
+
+  const pruneTrashRes = (await registered
+    .get('agent_cleaner_restore')
+    .execute({ prune: true })) as { argv: string[] };
+  assert.deepEqual(pruneTrashRes.argv, ['restore', '--prune', '--json']);
+
+  const configGetRes = (await registered.get('agent_cleaner_config').execute({})) as {
+    argv: string[];
+  };
+  assert.deepEqual(configGetRes.argv, ['config', 'show', '--json']);
+
+  const configSetRes = (await registered
+    .get('agent_cleaner_config')
+    .execute({ action: 'set', exemptHours: 48, coldThresholdDays: 21, autoPruneTrash: false })) as {
+    argv: string[];
+  };
+  assert.deepEqual(configSetRes.argv, [
+    'config',
+    'set',
+    '--exempt-hours',
+    '48',
+    '--cold-days',
+    '21',
+    '--auto-prune-trash',
+    'false',
+    '--json',
+  ]);
+
+  const configIgnoreRes = (await registered
+    .get('agent_cleaner_config')
+    .execute({ action: 'ignore_path', pattern: '~/.claude/vip' })) as { argv: string[] };
+  assert.deepEqual(configIgnoreRes.argv, ['config', 'ignore', 'add', '~/.claude/vip', '--json']);
+
+  const backupsListRes = (await registered.get('agent_cleaner_backups').execute({})) as {
+    argv: string[];
+  };
+  assert.deepEqual(backupsListRes.argv, ['backups', 'list', '--json']);
+
+  const backupsRestoreRes = (await registered
+    .get('agent_cleaner_backups')
+    .execute({ action: 'restore', backupId: 'bak-1' })) as { argv: string[] };
+  assert.deepEqual(backupsRestoreRes.argv, ['backups', 'restore', 'bak-1', '--json']);
+
+  const backupsPruneRes = (await registered
+    .get('agent_cleaner_backups')
+    .execute({ action: 'prune', keepCount: 10 })) as { argv: string[] };
+  assert.deepEqual(backupsPruneRes.argv, ['backups', 'prune', '--keep', '10', '--json']);
 
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
@@ -263,6 +348,10 @@ async function withRouteHarness(
       '#!/usr/bin/env node',
       "import fs from 'node:fs';",
       `fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + '\\n');`,
+      "if (process.argv.includes('--progress-json')) {",
+      "  process.stderr.write(JSON.stringify({ completed: 1, total: 2, agent: 'claude', currentBytes: 1024 }) + '\\n');",
+      "  process.stderr.write(JSON.stringify({ completed: 2, total: 2, agent: 'discovery', currentBytes: 2048 }) + '\\n');",
+      '}',
       'console.log(JSON.stringify({ argv: process.argv.slice(2) }));',
     ].join('\n'),
     { mode: 0o755 },
@@ -359,9 +448,12 @@ test('DSH HTTP routes require connection.requestRejection while keeping headless
       assert.deepEqual(
         registeredTools.sort(),
         [
+          'agent_cleaner_backups',
           'agent_cleaner_clean',
+          'agent_cleaner_config',
           'agent_cleaner_doctor',
           'agent_cleaner_mcp',
+          'agent_cleaner_overview',
           'agent_cleaner_restore',
           'agent_cleaner_scan',
         ],
@@ -466,7 +558,15 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
       assert.equal(ovJson.data.lang, 'en');
       assert.equal(typeof ovJson.data.scannedAt, 'number');
       assert.ok(ovJson.data.disk && ovJson.data.disk.totalBytes > 0 && ovJson.data.disk.availableBytes >= 0);
-      assert.deepEqual(ovJson.data.agents.argv, ['scan', '--older-than', '48h', '--lang', 'en', '--json']);
+      assert.deepEqual(ovJson.data.agents.argv, [
+        'scan',
+        '--older-than',
+        '48h',
+        '--lang',
+        'en',
+        '--progress-json',
+        '--json',
+      ]);
       assert.equal(await getExecCount(), 6);
 
       // Second identical overview request hits cache (no CLI execution)
@@ -501,8 +601,234 @@ test('DSH HTTP routes require application/json on POST and allow authenticated r
         data: { argv: ['mcp', '--kill', '--pid', '9999', '--json'] },
       });
       assert.equal(await getExecCount(), 12);
+
+      // Progress endpoint reflects latest stderr progress events after overview scan
+      const rProg = await fetch(`${baseUrl}/agent-cleaner/api/progress`, { method: 'GET' });
+      assert.equal(rProg.status, 200);
+      const progJson = (await rProg.json()) as {
+        ok: boolean;
+        data: { active: boolean; completed: number; total: number; agent: string; currentBytes: number };
+      };
+      assert.equal(progJson.ok, true);
+      assert.equal(progJson.data.active, false);
+      assert.equal(progJson.data.completed, 2);
+      assert.equal(progJson.data.total, 2);
+      assert.equal(progJson.data.agent, 'discovery');
+      assert.equal(progJson.data.currentBytes, 2048);
+
+      // SSE progress stream delivers initial snapshot event
+      const sseController = new AbortController();
+      const rSse = await fetch(`${baseUrl}/agent-cleaner/api/progress?stream=1`, {
+        headers: { accept: 'text/event-stream' },
+        signal: sseController.signal,
+      });
+      assert.equal(rSse.status, 200);
+      assert.match(rSse.headers.get('content-type') ?? '', /text\/event-stream/);
+      const reader = rSse.body?.getReader();
+      assert.ok(reader);
+      const firstChunk = await reader.read();
+      const firstText = Buffer.from(firstChunk.value ?? []).toString('utf8');
+      assert.match(firstText, /^data:\s*\{.*"completed":2/m);
+      sseController.abort();
+
+      // Config GET/POST & cache invalidation
+      const rCfgGet = await fetch(`${baseUrl}/agent-cleaner/api/config`, { method: 'GET' });
+      assert.equal(rCfgGet.status, 200);
+      assert.deepEqual(await rCfgGet.json(), { ok: true, data: { argv: ['config', 'show', '--json'] } });
+
+      const rCfgSet = await fetch(`${baseUrl}/agent-cleaner/api/config`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set',
+          exempt_hours: 12,
+          cold_threshold_days: 7,
+          trash_max_age_days: 15,
+          trash_max_size_mb: 1024,
+          auto_prune_trash: false,
+          backup_max_count: 10,
+        }),
+      });
+      assert.equal(rCfgSet.status, 200);
+      assert.deepEqual(await rCfgSet.json(), {
+        ok: true,
+        data: {
+          argv: [
+            'config',
+            'set',
+            '--exempt-hours',
+            '12',
+            '--cold-days',
+            '7',
+            '--trash-max-age-days',
+            '15',
+            '--trash-max-size-mb',
+            '1024',
+            '--auto-prune-trash',
+            'false',
+            '--backup-max-count',
+            '10',
+            '--json',
+          ],
+        },
+      });
+
+      const rCfgIgnore = await fetch(`${baseUrl}/agent-cleaner/api/config`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'ignore_path', pattern: '~/.claude/vip' }),
+      });
+      assert.equal(rCfgIgnore.status, 200);
+      assert.deepEqual(await rCfgIgnore.json(), {
+        ok: true,
+        data: { argv: ['config', 'ignore', 'add', '~/.claude/vip', '--json'] },
+      });
+
+      const rCfgUnignoreAgent = await fetch(`${baseUrl}/agent-cleaner/api/config`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'unignore_agent', pattern: 'aider' }),
+      });
+      assert.equal(rCfgUnignoreAgent.status, 200);
+      assert.deepEqual(await rCfgUnignoreAgent.json(), {
+        ok: true,
+        data: { argv: ['config', 'ignore-agent', 'remove', 'aider', '--json'] },
+      });
+
+      // Backups list / restore / delete / prune
+      const rBakList = await fetch(`${baseUrl}/agent-cleaner/api/backups`, { method: 'GET' });
+      assert.equal(rBakList.status, 200);
+      assert.deepEqual(await rBakList.json(), { ok: true, data: { argv: ['backups', 'list', '--json'] } });
+
+      const rBakRestore = await fetch(`${baseUrl}/agent-cleaner/api/backup-restore`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ backupId: 'b-id-1' }),
+      });
+      assert.equal(rBakRestore.status, 200);
+      assert.deepEqual(await rBakRestore.json(), {
+        ok: true,
+        data: { argv: ['backups', 'restore', 'b-id-1', '--json'] },
+      });
+
+      const rBakDelete = await fetch(`${baseUrl}/agent-cleaner/api/backup-delete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ backupId: 'b-id-2' }),
+      });
+      assert.equal(rBakDelete.status, 200);
+      assert.deepEqual(await rBakDelete.json(), {
+        ok: true,
+        data: { argv: ['backups', 'delete', 'b-id-2', '--json'] },
+      });
+
+      const rBakPrune = await fetch(`${baseUrl}/agent-cleaner/api/backup-prune`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ keepCount: 5 }),
+      });
+      assert.equal(rBakPrune.status, 200);
+      assert.deepEqual(await rBakPrune.json(), {
+        ok: true,
+        data: { argv: ['backups', 'prune', '--keep', '5', '--json'] },
+      });
+
+      // Trash prune
+      const rTrashPrune = await fetch(`${baseUrl}/agent-cleaner/api/trash-prune`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      assert.equal(rTrashPrune.status, 200);
+      assert.deepEqual(await rTrashPrune.json(), {
+        ok: true,
+        data: { argv: ['restore', '--prune', '--json'] },
+      });
+
+      // Selective doctor fix
+      const rDocFixSel = await fetch(`${baseUrl}/agent-cleaner/api/doctor-fix`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ issueIds: ['claude:dead_mcp:foo'] }),
+      });
+      assert.equal(rDocFixSel.status, 200);
+      assert.deepEqual(await rDocFixSel.json(), {
+        ok: true,
+        data: { argv: ['doctor', '--fix', '--ids', 'claude:dead_mcp:foo', '--json'] },
+      });
     },
   );
+});
+
+test('DSH HTTP auth rejects unauthenticated access on config, backups, progress, and trash-prune', async () => {
+  await withRouteHarness(
+    { requestRejection: () => 401 },
+    async ({ baseUrl, getExecCount }) => {
+      for (const [urlPath, method] of [
+        ['/agent-cleaner/api/config', 'GET'],
+        ['/agent-cleaner/api/backups', 'GET'],
+        ['/agent-cleaner/api/progress', 'GET'],
+        ['/agent-cleaner/api/trash-prune', 'POST'],
+        ['/agent-cleaner/api/backup-restore', 'POST'],
+      ] as const) {
+        const res = await fetch(`${baseUrl}${urlPath}`, {
+          method,
+          headers: method === 'POST' ? { 'content-type': 'application/json' } : undefined,
+          body: method === 'POST' ? JSON.stringify({}) : undefined,
+        });
+        assert.equal(res.status, 401);
+        assert.deepEqual(await res.json(), { ok: false, error: 'Unauthorized' });
+      }
+      assert.equal(await getExecCount(), 0);
+    },
+  );
+});
+
+function createZip(fileName: string, content: Buffer, method: 0 | 8): Buffer {
+  const nameBuf = Buffer.from(fileName, 'utf8');
+  const payload = method === 8 ? deflateRawSync(content) : content;
+
+  const lfh = Buffer.alloc(30 + nameBuf.length, 0);
+  lfh.writeUInt32LE(0x04034b50, 0);
+  lfh.writeUInt16LE(20, 4);
+  lfh.writeUInt16LE(method, 8);
+  lfh.writeUInt32LE(payload.length, 18);
+  lfh.writeUInt32LE(content.length, 22);
+  lfh.writeUInt16LE(nameBuf.length, 26);
+  nameBuf.copy(lfh, 30);
+
+  const cd = Buffer.alloc(46 + nameBuf.length, 0);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4);
+  cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(method, 10);
+  cd.writeUInt32LE(payload.length, 20);
+  cd.writeUInt32LE(content.length, 24);
+  cd.writeUInt16LE(nameBuf.length, 28);
+  cd.writeUInt32LE(0, 42);
+  nameBuf.copy(cd, 46);
+
+  const cdOffset = lfh.length + payload.length;
+  const eocd = Buffer.alloc(22, 0);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(cd.length, 12);
+  eocd.writeUInt32LE(cdOffset, 16);
+
+  return Buffer.concat([lfh, payload, cd, eocd]);
+}
+
+test('extractBinaryFromZip and resolveReleaseAssetName handle Windows ZIP assets cross-platform', () => {
+  assert.equal(resolveReleaseAssetName('win32', 'x64'), 'agent-cleaner-win32-x64.zip');
+  assert.equal(resolveReleaseAssetName('win32', 'arm64'), 'agent-cleaner-win32-x64.zip');
+
+  const sample = Buffer.from('MZ-fake-pe-binary-payload', 'utf8');
+  const storedZip = createZip('bin/agent-cleaner.exe', sample, 0);
+  assert.deepEqual(extractBinaryFromZip(storedZip, 'agent-cleaner.exe'), sample);
+
+  const deflatedZip = createZip('agent-cleaner.exe', sample, 8);
+  assert.deepEqual(extractBinaryFromZip(deflatedZip, 'agent-cleaner.exe'), sample);
 });
 
 test('findExistingBinaryPath skips npm CLI shims in PATH to avoid recursion', async () => {

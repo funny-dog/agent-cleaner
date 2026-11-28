@@ -42,10 +42,11 @@ fn maybe_push_cold_entry(
     label: String,
     out: &mut Vec<ColdCacheFinding>,
     now_ms: u64,
+    threshold_days: u64,
 ) {
     let atime_ms = safe_atime_ms(path, now_ms);
     let age_days = now_ms.saturating_sub(atime_ms) / MS_PER_DAY;
-    if age_days >= COLD_THRESHOLD_DAYS {
+    if age_days >= threshold_days {
         let size_bytes = entry_size(path);
         if size_bytes > 0 {
             out.push(ColdCacheFinding {
@@ -60,7 +61,13 @@ fn maybe_push_cold_entry(
     }
 }
 
-fn scan_flat_cold_dir(dir: &Path, source: &str, out: &mut Vec<ColdCacheFinding>, now_ms: u64) {
+fn scan_flat_cold_dir(
+    dir: &Path,
+    source: &str,
+    out: &mut Vec<ColdCacheFinding>,
+    now_ms: u64,
+    threshold_days: u64,
+) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -69,7 +76,7 @@ fn scan_flat_cold_dir(dir: &Path, source: &str, out: &mut Vec<ColdCacheFinding>,
         if name == ".DS_Store" {
             continue;
         }
-        maybe_push_cold_entry(&entry.path(), source, name, out, now_ms);
+        maybe_push_cold_entry(&entry.path(), source, name, out, now_ms, threshold_days);
     }
 }
 
@@ -78,6 +85,7 @@ fn scan_uv_cold_dir(
     out: &mut Vec<ColdCacheFinding>,
     tmp_out: Option<&mut Vec<(PathBuf, String, u64, u64)>>,
     now_ms: u64,
+    threshold_days: u64,
 ) {
     let Ok(entries) = fs::read_dir(uv_dir) else {
         return;
@@ -86,7 +94,8 @@ fn scan_uv_cold_dir(
     for entry in entries.flatten() {
         let full_path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".DS_Store" || name == ".gitignore" || name == ".lock" || name == "CACHEDIR.TAG" {
+        if name == ".DS_Store" || name == ".gitignore" || name == ".lock" || name == "CACHEDIR.TAG"
+        {
             continue;
         }
         if name.starts_with(".tmp") {
@@ -117,16 +126,22 @@ fn scan_uv_cold_dir(
                         format!("{name}/{sub_name}"),
                         out,
                         now_ms,
+                        threshold_days,
                     );
                 }
             }
         } else {
-            maybe_push_cold_entry(&full_path, "uv", name, out, now_ms);
+            maybe_push_cold_entry(&full_path, "uv", name, out, now_ms, threshold_days);
         }
     }
 }
 
-fn scan_puppeteer_cold_dir(dir: &Path, out: &mut Vec<ColdCacheFinding>, now_ms: u64) {
+fn scan_puppeteer_cold_dir(
+    dir: &Path,
+    out: &mut Vec<ColdCacheFinding>,
+    now_ms: u64,
+    threshold_days: u64,
+) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -155,41 +170,98 @@ fn scan_puppeteer_cold_dir(dir: &Path, out: &mut Vec<ColdCacheFinding>, now_ms: 
                         format!("{name}/{sub_name}"),
                         out,
                         now_ms,
+                        threshold_days,
                     );
                 }
             }
             if !has_children {
-                maybe_push_cold_entry(&full_path, "puppeteer", name, out, now_ms);
+                maybe_push_cold_entry(&full_path, "puppeteer", name, out, now_ms, threshold_days);
             }
         } else {
-            maybe_push_cold_entry(&full_path, "puppeteer", name, out, now_ms);
+            maybe_push_cold_entry(&full_path, "puppeteer", name, out, now_ms, threshold_days);
         }
     }
 }
 
 pub(crate) fn collect_cold_caches(ctx: &CleanerContext) -> Vec<ColdCacheEntry> {
     let now = ctx.now();
+    let threshold_days = crate::config::load_config(ctx).cold_threshold_days;
     let mut findings = Vec::new();
-    scan_flat_cold_dir(&ctx.home_dir.join(".npm/_npx"), "npm/_npx", &mut findings, now);
-    scan_uv_cold_dir(&ctx.home_dir.join(".cache/uv"), &mut findings, None, now);
+    scan_flat_cold_dir(
+        &ctx.home_dir.join(".npm/_npx"),
+        "npm/_npx",
+        &mut findings,
+        now,
+        threshold_days,
+    );
+    scan_uv_cold_dir(
+        &ctx.home_dir.join(".cache/uv"),
+        &mut findings,
+        None,
+        now,
+        threshold_days,
+    );
     scan_flat_cold_dir(
         &ctx.home_dir.join("Library/Caches/pnpm/dlx"),
         "pnpm/dlx",
         &mut findings,
         now,
+        threshold_days,
     );
     scan_flat_cold_dir(
         &ctx.home_dir.join(".cache/pnpm/dlx"),
         "pnpm/dlx",
         &mut findings,
         now,
+        threshold_days,
     );
-    scan_puppeteer_cold_dir(&ctx.home_dir.join(".cache/puppeteer"), &mut findings, now);
+    scan_puppeteer_cold_dir(
+        &ctx.home_dir.join(".cache/puppeteer"),
+        &mut findings,
+        now,
+        threshold_days,
+    );
     scan_flat_cold_dir(
         &ctx.home_dir.join("Library/Caches/ms-playwright"),
         "ms-playwright",
         &mut findings,
         now,
+        threshold_days,
+    );
+    scan_flat_cold_dir(
+        &ctx.home_dir.join(".cache/ms-playwright"),
+        "ms-playwright",
+        &mut findings,
+        now,
+        threshold_days,
+    );
+    scan_flat_cold_dir(
+        &ctx.home_dir.join("AppData/Local/ms-playwright"),
+        "ms-playwright",
+        &mut findings,
+        now,
+        threshold_days,
+    );
+    scan_flat_cold_dir(
+        &ctx.home_dir.join("AppData/Local/pnpm/dlx"),
+        "pnpm/dlx",
+        &mut findings,
+        now,
+        threshold_days,
+    );
+    scan_flat_cold_dir(
+        &ctx.home_dir.join("AppData/Local/npm-cache/_npx"),
+        "npm/_npx",
+        &mut findings,
+        now,
+        threshold_days,
+    );
+    scan_uv_cold_dir(
+        &ctx.home_dir.join("AppData/Local/uv/cache"),
+        &mut findings,
+        None,
+        now,
+        threshold_days,
     );
 
     findings
@@ -211,11 +283,16 @@ impl AgentTarget for ColdCacheTarget {
     fn claimed_dirs(&self, ctx: &CleanerContext) -> Vec<PathBuf> {
         vec![
             ctx.home_dir.join(".npm/_npx"),
+            ctx.home_dir.join("AppData/Local/npm-cache/_npx"),
             ctx.home_dir.join(".cache/uv"),
+            ctx.home_dir.join("AppData/Local/uv/cache"),
             ctx.home_dir.join("Library/Caches/pnpm/dlx"),
             ctx.home_dir.join(".cache/pnpm/dlx"),
+            ctx.home_dir.join("AppData/Local/pnpm/dlx"),
             ctx.home_dir.join(".cache/puppeteer"),
             ctx.home_dir.join("Library/Caches/ms-playwright"),
+            ctx.home_dir.join(".cache/ms-playwright"),
+            ctx.home_dir.join("AppData/Local/ms-playwright"),
         ]
     }
 
@@ -223,26 +300,96 @@ impl AgentTarget for ColdCacheTarget {
         let now_ms = ctx.now();
         let mut items: Vec<ScanItem> = Vec::new();
         let npx_dir = ctx.home_dir.join(".npm/_npx");
+        let npx_win_dir = ctx.home_dir.join("AppData/Local/npm-cache/_npx");
         let uv_dir = ctx.home_dir.join(".cache/uv");
+        let uv_win_dir = ctx.home_dir.join("AppData/Local/uv/cache");
         let pnpm_dlx_lib = ctx.home_dir.join("Library/Caches/pnpm/dlx");
         let pnpm_dlx_xdg = ctx.home_dir.join(".cache/pnpm/dlx");
+        let pnpm_dlx_win = ctx.home_dir.join("AppData/Local/pnpm/dlx");
         let puppeteer_dir = ctx.home_dir.join(".cache/puppeteer");
         let playwright_dir = ctx.home_dir.join("Library/Caches/ms-playwright");
+        let playwright_xdg = ctx.home_dir.join(".cache/ms-playwright");
+        let playwright_win = ctx.home_dir.join("AppData/Local/ms-playwright");
 
+        let threshold_days = crate::config::load_config(ctx).cold_threshold_days;
         let mut findings = Vec::new();
         let mut uv_tmps = Vec::new();
 
-        scan_flat_cold_dir(&npx_dir, "npm/_npx", &mut findings, now_ms);
-        scan_uv_cold_dir(&uv_dir, &mut findings, Some(&mut uv_tmps), now_ms);
-        scan_flat_cold_dir(&pnpm_dlx_lib, "pnpm/dlx", &mut findings, now_ms);
-        scan_flat_cold_dir(&pnpm_dlx_xdg, "pnpm/dlx", &mut findings, now_ms);
-        scan_puppeteer_cold_dir(&puppeteer_dir, &mut findings, now_ms);
-        scan_flat_cold_dir(&playwright_dir, "ms-playwright", &mut findings, now_ms);
+        scan_flat_cold_dir(&npx_dir, "npm/_npx", &mut findings, now_ms, threshold_days);
+        scan_flat_cold_dir(
+            &npx_win_dir,
+            "npm/_npx",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_uv_cold_dir(
+            &uv_dir,
+            &mut findings,
+            Some(&mut uv_tmps),
+            now_ms,
+            threshold_days,
+        );
+        scan_uv_cold_dir(
+            &uv_win_dir,
+            &mut findings,
+            Some(&mut uv_tmps),
+            now_ms,
+            threshold_days,
+        );
+        scan_flat_cold_dir(
+            &pnpm_dlx_lib,
+            "pnpm/dlx",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_flat_cold_dir(
+            &pnpm_dlx_xdg,
+            "pnpm/dlx",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_flat_cold_dir(
+            &pnpm_dlx_win,
+            "pnpm/dlx",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_puppeteer_cold_dir(&puppeteer_dir, &mut findings, now_ms, threshold_days);
+        scan_flat_cold_dir(
+            &playwright_dir,
+            "ms-playwright",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_flat_cold_dir(
+            &playwright_xdg,
+            "ms-playwright",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
+        scan_flat_cold_dir(
+            &playwright_win,
+            "ms-playwright",
+            &mut findings,
+            now_ms,
+            threshold_days,
+        );
 
         for f in findings {
             let desc = match lang {
-                Language::Zh => format!("{} 冷缓存 ({} 天未访问): {}", f.source, f.age_days, f.label),
-                Language::En => format!("Cold {} cache ({}d unused): {}", f.source, f.age_days, f.label),
+                Language::Zh => {
+                    format!("{} 冷缓存 ({} 天未访问): {}", f.source, f.age_days, f.label)
+                }
+                Language::En => format!(
+                    "Cold {} cache ({}d unused): {}",
+                    f.source, f.age_days, f.label
+                ),
             };
             items.push(make_item(
                 "pkg-cache",
@@ -278,11 +425,16 @@ impl AgentTarget for ColdCacheTarget {
         }
 
         let disk_usage_bytes = get_dir_size(&npx_dir)
+            + get_dir_size(&npx_win_dir)
             + get_dir_size(&uv_dir)
+            + get_dir_size(&uv_win_dir)
             + get_dir_size(&pnpm_dlx_lib)
             + get_dir_size(&pnpm_dlx_xdg)
+            + get_dir_size(&pnpm_dlx_win)
             + get_dir_size(&puppeteer_dir)
-            + get_dir_size(&playwright_dir);
+            + get_dir_size(&playwright_dir)
+            + get_dir_size(&playwright_xdg)
+            + get_dir_size(&playwright_win);
         let total_bytes = items.iter().map(|i| i.size_bytes).sum();
 
         ScanResult {

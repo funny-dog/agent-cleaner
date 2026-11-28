@@ -20,11 +20,11 @@
 
 ## 安全机制与特性
 
-1. **Claude Code 孤儿会话精准识别**：流式读取最新 `.jsonl` 前 30 行提取真实工作目录 `cwd`，避免按目录名连字符拆分导致误判；自动识别并保护未挂载的 `/Volumes/*`、`/mnt/*` 外接磁盘路径，同时检测 `> 10MB` 的膨胀会话文件。
-2. **多工具深度覆盖**：支持清理 OpenCode Shadow Git 快照、Codex `sessions/` 历史日志、DSH profile 下未声明的残留包（含 `@scope/pkg`），以及超过 14 天未访问的 `npm/_npx` 与 `uv` 缓存。
-3. **保注释配置修复 (`doctor`)**：基于 `jsonc-parser`、`toml_edit` 与 YAML CST/AST 修改失效的 MCP 配置项，完整保留原有注释与缩进，写入前自动备份至 `~/.agent-cleaner/backups/`。
-4. **孤儿 MCP 进程查杀**：通过 `sysinfo` 定位 `PPID=1` 的僵尸 stdio MCP 进程，按 `SIGTERM -> 1.5s -> SIGKILL` 分级退出，不触碰常驻 SSE/HTTP 服务。
-5. **跨分区可逆回收站 (`trash`)**：默认豁免 24 小时内修改过的活跃文件。清理项统一移入 `~/.agent-cleaner/trash/<batchId>/` 并记录 `manifest.json`，遇到跨分区（`EXDEV`）自动回退为复制校验后删除，随时可通过 `ac restore <batchId>` 原路还原。
+1. **Claude Code 孤儿会话精准识别**：流式读取最新 `.jsonl` 前 30 行提取真实工作目录 `cwd`，避免按目录名连字符拆分导致误判；自动识别并保护未挂载的 `/Volumes/*`、`/mnt/*`、`/run/media/*` 与 Windows 盘符/UNC 路径，同时检测 `> 10MB` 的膨胀会话文件。
+2. **多工具与 Windows 深度覆盖**：支持清理 OpenCode Shadow Git 快照、Codex `sessions/` 历史日志、DSH profile 下未声明的残留包（含 `@scope/pkg`）、长期未访问的 `npm/_npx` / `uv` / `pnpm` / `playwright` 冷缓存，以及 Windows `AppData/Roaming` 与 `AppData/Local` 下的应用与 MCP 配置。
+3. **保注释配置修复与备份回滚 (`doctor` / `backups`)**：基于 `jsonc-parser`、`toml_edit` 与 YAML CST/AST 全局或按 `issueIds` 选择性修复失效 MCP 配置，完整保留原有注释与缩进，写入前自动备份至 `~/.agent-cleaner/backups/` 并支持一键回滚（`ac backups restore <id>`）。
+4. **孤儿 MCP 进程查杀与冲突审计 (`mcp`)**：检测跨 Agent 同名冲突（`conflicts`）与重复配置，通过 `sysinfo` 定位孤儿 stdio MCP 进程（Unix `PPID=1` 与 Windows 父进程已退出的孤儿进程），按 `SIGTERM -> SIGKILL`（Windows `taskkill /T -> /F /T`）优雅退出，不触碰常驻 SSE/HTTP 服务。
+5. **跨平台可逆回收站与白名单 (`trash` / `config`)**：默认豁免 24 小时内修改过的活跃文件及 `~/.agent-cleaner/config.toml` 白名单路径。清理项通过盘符安全的相对路径移入 `~/.agent-cleaner/trash/<batchId>/`，支持跨分区回退、过期/超额自动淘汰（`ac restore --prune`）以及一键原路还原（`ac restore <batchId>`）。
 
 ## 目录结构
 
@@ -79,13 +79,19 @@ npm run install:cli
 
 ```bash
 ac                  # 启动交互式向导菜单（非 TTY 管道环境下输出总览）
-ac scan
+ac overview         # 输出磁盘占用、配置诊断、MCP 审计与回收站总览
+ac scan [--progress-json]
 ac clean --dry-run
 ac clean --only-recommended
-ac doctor --fix
+ac doctor --fix [--ids <id1,id2>]
 ac mcp --kill
 ac restore <batchId>
+ac restore --prune
+ac config [show|set|ignore|ignore-agent]
+ac backups [list|restore <id>|delete <id>|prune]
 ```
+
+内置 Stdio MCP Server（`ac mcp-server` / `npx -y dsh-agent-cleaner mcp-server`）提供 8 个工具：`cleaner_overview`、`cleaner_scan`、`cleaner_clean`、`cleaner_doctor`、`cleaner_mcp_audit`、`cleaner_restore`、`cleaner_config`、`cleaner_backups`。
 
 ### 2. 插件接入（免装全局 CLI，开箱即用）
 

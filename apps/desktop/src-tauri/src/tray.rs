@@ -31,6 +31,7 @@ pub fn update_tray_summary(app: &AppHandle, reclaimable_bytes: u64, orphan_mcp_c
             size_str
         };
         let _ = tray.set_title(Some(&title));
+        let _ = tray.set_tooltip(Some(&title));
     }
 }
 
@@ -59,6 +60,9 @@ fn toggle_tray_popover(app: &AppHandle, click_pos: Option<PhysicalPosition<f64>>
         }
         if let Some(pos) = click_pos {
             let x = (pos.x - 180.0).max(16.0) as i32;
+            #[cfg(windows)]
+            let y = (pos.y - 450.0).max(16.0) as i32;
+            #[cfg(not(windows))]
             let y = (pos.y + 10.0).max(24.0) as i32;
             let _ = win.set_position(PhysicalPosition::new(x, y));
         }
@@ -67,21 +71,21 @@ fn toggle_tray_popover(app: &AppHandle, click_pos: Option<PhysicalPosition<f64>>
         return;
     }
 
-    let mut builder = WebviewWindowBuilder::new(
-        app,
-        "tray",
-        WebviewUrl::App("index.html?view=tray".into()),
-    )
-    .title("Agent Cleaner Tray")
-    .inner_size(360.0, 440.0)
-    .resizable(false)
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .visible(false);
+    let mut builder =
+        WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("index.html?view=tray".into()))
+            .title("Agent Cleaner Tray")
+            .inner_size(360.0, 440.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false);
 
     if let Some(pos) = click_pos {
         let x = (pos.x - 180.0).max(16.0);
+        #[cfg(windows)]
+        let y = (pos.y - 450.0).max(16.0);
+        #[cfg(not(windows))]
         let y = (pos.y + 10.0).max(24.0);
         builder = builder.position(x, y);
     }

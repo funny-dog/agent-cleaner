@@ -1,4 +1,7 @@
-use super::{push_desktop_cache_dirs, push_dir_item, AgentTarget};
+use super::{
+    platform_cache_dirs, platform_log_dirs, platform_support_dirs, push_desktop_cache_dirs,
+    push_dir_item, AgentTarget,
+};
 use crate::fs_safe::{
     extract_external_mountpoint, get_dir_size, get_file_size, is_mountpoint_accessible,
     safe_mtime_ms,
@@ -6,6 +9,7 @@ use crate::fs_safe::{
 use crate::recommendation::make_item;
 use crate::types::{CleanerContext, ItemStatus, Language, ScanCategory, ScanItem, ScanResult};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -133,7 +137,7 @@ impl AgentTarget for ClaudeTarget {
         let app_support = ctx.home_dir.join("Library/Application Support");
         let caches = ctx.home_dir.join("Library/Caches");
         let logs = ctx.home_dir.join("Library/Logs");
-        vec![
+        let mut dirs = vec![
             ctx.home_dir.join(".claude"),
             ctx.home_dir.join(".claude-cage"),
             ctx.home_dir.join(".claude-cage-downloads"),
@@ -144,13 +148,39 @@ impl AgentTarget for ClaudeTarget {
             app_support.join("Claude-wb-cn"),
             app_support.join("Claude-wb-cn-3p"),
             app_support.join("MultiClaude"),
+            ctx.home_dir.join("AppData/Local/AnthropicClaude"),
+            ctx.home_dir.join("AppData/Roaming/Claude"),
             caches.join("claude-cli-nodejs"),
             caches.join("com.anthropic.claudefordesktop"),
             caches.join("com.anthropic.claudefordesktop.ShipIt"),
             caches.join("io.github.lee-xeo.claude-cage"),
             logs.join("Claude"),
             logs.join("Claude-3p"),
-        ]
+        ];
+        for variant in [
+            "Claude",
+            "Claude-3p",
+            "Claude-kiro",
+            "Claude-qoder-cn-3p",
+            "Claude-wb-cn",
+            "Claude-wb-cn-3p",
+            "MultiClaude",
+        ] {
+            for d in platform_support_dirs(ctx, variant) {
+                if !dirs.contains(&d) {
+                    dirs.push(d);
+                }
+            }
+        }
+        for d in platform_cache_dirs(ctx, "claude-cli-nodejs")
+            .into_iter()
+            .chain(platform_log_dirs(ctx, "Claude"))
+        {
+            if !dirs.contains(&d) {
+                dirs.push(d);
+            }
+        }
+        dirs
     }
 
     fn scan(&self, ctx: &CleanerContext, exempt_hours: u64, lang: Language) -> ScanResult {
@@ -234,10 +264,30 @@ impl AgentTarget for ClaudeTarget {
         }
 
         for (subdir, category, zh, en) in [
-            ("file-history", ScanCategory::Cache, "Claude 文件修改历史缓存", "Claude file-history cache"),
-            ("shell-snapshots", ScanCategory::Cache, "Claude 终端快照缓存", "Claude shell snapshots cache"),
-            ("debug", ScanCategory::Log, "Claude 调试日志", "Claude debug logs"),
-            ("paste-cache", ScanCategory::Cache, "Claude 剪贴板粘贴缓存", "Claude paste cache"),
+            (
+                "file-history",
+                ScanCategory::Cache,
+                "Claude 文件修改历史缓存",
+                "Claude file-history cache",
+            ),
+            (
+                "shell-snapshots",
+                ScanCategory::Cache,
+                "Claude 终端快照缓存",
+                "Claude shell snapshots cache",
+            ),
+            (
+                "debug",
+                ScanCategory::Log,
+                "Claude 调试日志",
+                "Claude debug logs",
+            ),
+            (
+                "paste-cache",
+                ScanCategory::Cache,
+                "Claude 剪贴板粘贴缓存",
+                "Claude paste cache",
+            ),
         ] {
             push_dir_item(
                 &mut items,
@@ -265,26 +315,47 @@ impl AgentTarget for ClaudeTarget {
             "MultiClaude",
         ];
 
+        let mut extra_support_dirs = Vec::new();
         for variant in extra_claude_dirs {
-            let variant_dir = app_support.join(variant);
-            push_desktop_cache_dirs(
-                &mut items,
-                "claude",
-                &variant_dir,
-                variant,
-                variant,
-                exempt_hours,
-                now_ms,
-                lang,
-            );
-            scan_old_claude_code_versions(
-                &variant_dir,
-                variant,
-                &mut items,
-                exempt_hours,
-                now_ms,
-                lang,
-            );
+            for variant_dir in platform_support_dirs(ctx, variant) {
+                push_desktop_cache_dirs(
+                    &mut items,
+                    "claude",
+                    &variant_dir,
+                    variant,
+                    variant,
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                );
+                scan_old_claude_code_versions(
+                    &variant_dir,
+                    variant,
+                    &mut items,
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                );
+                extra_support_dirs.push(variant_dir);
+            }
+        }
+        for win_dir in [
+            ctx.home_dir.join("AppData/Local/AnthropicClaude"),
+            ctx.home_dir.join("AppData/Roaming/Claude"),
+        ] {
+            if !extra_support_dirs.contains(&win_dir) {
+                push_desktop_cache_dirs(
+                    &mut items,
+                    "claude",
+                    &win_dir,
+                    "Claude",
+                    "Claude",
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                );
+                extra_support_dirs.push(win_dir);
+            }
         }
 
         // Scan Claude Cage Lima VM disk images (except _config) as Optional Snapshot items
@@ -331,7 +402,10 @@ impl AgentTarget for ClaudeTarget {
                     claude_json_bak.to_string_lossy().to_string(),
                     size,
                     mtime,
-                    lang.tr("Claude 全局配置历史备份 (.claude.json.backup)", "Claude global config backup (.claude.json.backup)"),
+                    lang.tr(
+                        "Claude 全局配置历史备份 (.claude.json.backup)",
+                        "Claude global config backup (.claude.json.backup)",
+                    ),
                     ItemStatus::Cold,
                     exempt_hours,
                     now_ms,
@@ -353,14 +427,16 @@ impl AgentTarget for ClaudeTarget {
                 ItemStatus::Active,
             ),
             (
-                ctx.home_dir.join("Library/Caches/com.anthropic.claudefordesktop"),
+                ctx.home_dir
+                    .join("Library/Caches/com.anthropic.claudefordesktop"),
                 ScanCategory::Cache,
                 "Claude Desktop 桌面端应用缓存",
                 "Claude for Desktop application cache",
                 ItemStatus::Active,
             ),
             (
-                ctx.home_dir.join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"),
+                ctx.home_dir
+                    .join("Library/Caches/com.anthropic.claudefordesktop.ShipIt"),
                 ScanCategory::Updater,
                 "Claude Desktop 自动更新安装包残留",
                 "Claude for Desktop ShipIt updater cache",
@@ -402,7 +478,8 @@ impl AgentTarget for ClaudeTarget {
                 ItemStatus::Cold,
             ),
             (
-                ctx.home_dir.join("Library/Caches/io.github.lee-xeo.claude-cage"),
+                ctx.home_dir
+                    .join("Library/Caches/io.github.lee-xeo.claude-cage"),
                 ScanCategory::Cache,
                 "Claude Cage macOS 应用缓存",
                 "Claude Cage macOS application cache",
@@ -437,16 +514,60 @@ impl AgentTarget for ClaudeTarget {
             );
         }
 
-        let support_size: u64 = extra_claude_dirs
+        let mut seen_extra = HashSet::new();
+        let support_size: u64 = extra_support_dirs
             .iter()
-            .map(|name| get_dir_size(&app_support.join(name)))
+            .filter(|d| seen_extra.insert((*d).clone()))
+            .map(|d| get_dir_size(d))
             .sum();
+
+        for cache_dir in platform_cache_dirs(ctx, "claude-cli-nodejs") {
+            if cache_dir != ctx.home_dir.join("Library/Caches/claude-cli-nodejs") {
+                push_dir_item(
+                    &mut items,
+                    "claude",
+                    &cache_dir,
+                    ScanCategory::Cache,
+                    lang.tr(
+                        "Claude CLI Node.js 运行时缓存",
+                        "Claude CLI Node.js runtime cache",
+                    ),
+                    ItemStatus::Active,
+                    true,
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                );
+            }
+        }
+        for log_dir in platform_log_dirs(ctx, "Claude") {
+            if log_dir != logs_claude {
+                push_dir_item(
+                    &mut items,
+                    "claude",
+                    &log_dir,
+                    ScanCategory::Log,
+                    lang.tr(
+                        "Claude Desktop 系统运行日志",
+                        "Claude for Desktop system logs",
+                    ),
+                    ItemStatus::Active,
+                    true,
+                    exempt_hours,
+                    now_ms,
+                    lang,
+                );
+            }
+        }
 
         let disk_usage_bytes = get_dir_size(&claude_dir)
             + support_size
             + get_dir_size(&ctx.home_dir.join(".claude-cage"))
             + get_dir_size(&cage_downloads)
-            + get_dir_size(&ctx.home_dir.join("Library/Caches/io.github.lee-xeo.claude-cage"))
+            + get_dir_size(
+                &ctx.home_dir
+                    .join("Library/Caches/io.github.lee-xeo.claude-cage"),
+            )
             + get_dir_size(&logs_claude)
             + get_dir_size(&logs_claude_3p);
 

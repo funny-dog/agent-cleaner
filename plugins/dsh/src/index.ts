@@ -2,7 +2,7 @@
  * DeepSeek Harness (DSH) Cordis plugin for agent-cleaner.
  * Exposes headless Cordis Tools and HTTP bridge routes backed by the `agent-cleaner` binary.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 const execFileAsync = promisify(execFile);
 
@@ -76,7 +76,9 @@ export function resolveReleaseAssetName(
   if (platform === 'darwin' && arch === 'x64') return 'agent-cleaner-darwin-x64.tar.gz';
   if (platform === 'linux' && arch === 'x64') return 'agent-cleaner-linux-x64.tar.gz';
   if (platform === 'linux' && arch === 'arm64') return 'agent-cleaner-linux-arm64.tar.gz';
-  if (platform === 'win32' && arch === 'x64') return 'agent-cleaner-win32-x64.zip';
+  if (platform === 'win32' && (arch === 'x64' || arch === 'arm64')) {
+    return 'agent-cleaner-win32-x64.zip';
+  }
   throw new Error(
     `Unsupported platform for auto-downloading agent-cleaner: ${platform}/${arch}. Install manually or configure binaryPath.`,
   );
@@ -145,7 +147,8 @@ export function isNativeBinaryCandidate(filePath: string): boolean {
 
 function findInPath(binName: string): string | null {
   const pathEnv = process.env.PATH ?? '';
-  for (const dir of pathEnv.split(path.delimiter)) {
+  for (const rawDir of pathEnv.split(path.delimiter)) {
+    const dir = rawDir.trim().replace(/^"|"$/g, '');
     if (!dir) continue;
     const candidate = path.join(dir, binName);
     if (isNativeBinaryCandidate(candidate)) return candidate;
@@ -243,6 +246,95 @@ function buildDownloadCandidates(config?: DshPluginConfig): {
   return { assetName, urls };
 }
 
+class UnsupportedZipMethodError extends Error {
+  constructor(method: number) {
+    super(`Unsupported ZIP compression method: ${method}`);
+  }
+}
+
+export function extractBinaryFromZip(zipBuffer: Buffer, targetFileName: string): Buffer {
+  const EOCD_SIG = 0x06054b50;
+  const CD_SIG = 0x02014b50;
+  const LFH_SIG = 0x04034b50;
+
+  let eocdOffset = -1;
+  const minOffset = Math.max(0, zipBuffer.length - 65557);
+  for (let i = zipBuffer.length - 22; i >= minOffset; i -= 1) {
+    if (zipBuffer.readUInt32LE(i) === EOCD_SIG) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error('Invalid ZIP archive: EOCD record not found');
+  }
+
+  const totalEntries = zipBuffer.readUInt16LE(eocdOffset + 10);
+  const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+  let pos = cdOffset;
+
+  for (let idx = 0; idx < totalEntries; idx += 1) {
+    if (pos + 46 > zipBuffer.length || zipBuffer.readUInt32LE(pos) !== CD_SIG) {
+      throw new Error('Invalid ZIP central directory header');
+    }
+    const method = zipBuffer.readUInt16LE(pos + 10);
+    const compressedSize = zipBuffer.readUInt32LE(pos + 20);
+    const nameLen = zipBuffer.readUInt16LE(pos + 28);
+    const extraLen = zipBuffer.readUInt16LE(pos + 30);
+    const commentLen = zipBuffer.readUInt16LE(pos + 32);
+    const localHeaderOffset = zipBuffer.readUInt32LE(pos + 42);
+    const entryName = zipBuffer.toString('utf8', pos + 46, pos + 46 + nameLen);
+    pos += 46 + nameLen + extraLen + commentLen;
+
+    if (path.posix.basename(entryName.replace(/\\/g, '/')) !== targetFileName) {
+      continue;
+    }
+
+    if (
+      localHeaderOffset + 30 > zipBuffer.length ||
+      zipBuffer.readUInt32LE(localHeaderOffset) !== LFH_SIG
+    ) {
+      throw new Error(`Invalid ZIP local header for ${entryName}`);
+    }
+    const lhNameLen = zipBuffer.readUInt16LE(localHeaderOffset + 26);
+    const lhExtraLen = zipBuffer.readUInt16LE(localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + lhNameLen + lhExtraLen;
+    if (dataStart + compressedSize > zipBuffer.length) {
+      throw new Error(`Truncated ZIP entry for ${entryName}`);
+    }
+
+    const compressed = zipBuffer.subarray(dataStart, dataStart + compressedSize);
+    if (method === 0) return Buffer.from(compressed);
+    if (method === 8) return inflateRawSync(compressed);
+    throw new UnsupportedZipMethodError(method);
+  }
+
+  throw new Error(`Archive does not contain ${targetFileName}`);
+}
+
+function replaceFileSync(tmpPath: string, destPath: string): void {
+  try {
+    renameSync(tmpPath, destPath);
+  } catch (err: any) {
+    if (
+      process.platform === 'win32' &&
+      existsSync(destPath) &&
+      (err?.code === 'EPERM' || err?.code === 'EEXIST' || err?.code === 'EBUSY')
+    ) {
+      const oldPath = `${destPath}.old-${process.pid}-${Date.now()}`;
+      renameSync(destPath, oldPath);
+      renameSync(tmpPath, destPath);
+      try {
+        rmSync(oldPath, { force: true });
+      } catch {
+        // ignore if old binary is still locked
+      }
+      return;
+    }
+    throw err;
+  }
+}
+
 async function downloadAndInstallBinary(
   destPath: string,
   config?: DshPluginConfig,
@@ -279,25 +371,37 @@ async function downloadAndInstallBinary(
   const tmpPath = `${destPath}.tmp-${process.pid}-${Date.now()}`;
   try {
     if (assetName.endsWith('.zip')) {
-      const tmpZip = `${destPath}.download-${process.pid}-${Date.now()}.zip`;
-      const extractDir = `${destPath}.extract-${process.pid}-${Date.now()}`;
-      writeFileSync(tmpZip, archiveBuffer);
       try {
-        mkdirSync(extractDir, { recursive: true });
-        await execFileAsync('powershell.exe', [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Expand-Archive -Path '${tmpZip.replaceAll("'", "''")}' -DestinationPath '${extractDir.replaceAll("'", "''")}' -Force`,
-        ]);
-        const extractedExe = path.join(extractDir, binaryFilename('win32'));
-        if (!isExistingFile(extractedExe)) {
-          throw new Error(`Archive does not contain ${binaryFilename('win32')}`);
+        const binaryBuf = extractBinaryFromZip(archiveBuffer, binaryFilename('win32'));
+        writeFileSync(tmpPath, binaryBuf);
+      } catch (zipErr) {
+        if (!(zipErr instanceof UnsupportedZipMethodError)) {
+          throw zipErr;
         }
-        renameSync(extractedExe, tmpPath);
-      } finally {
-        rmSync(tmpZip, { force: true });
-        rmSync(extractDir, { recursive: true, force: true });
+        const tmpZip = `${destPath}.download-${process.pid}-${Date.now()}.zip`;
+        const extractDir = `${destPath}.extract-${process.pid}-${Date.now()}`;
+        writeFileSync(tmpZip, archiveBuffer);
+        try {
+          mkdirSync(extractDir, { recursive: true });
+          await execFileAsync(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              `Expand-Archive -Path '${tmpZip.replaceAll("'", "''")}' -DestinationPath '${extractDir.replaceAll("'", "''")}' -Force`,
+            ],
+            { windowsHide: true },
+          );
+          const extractedExe = path.join(extractDir, binaryFilename('win32'));
+          if (!isExistingFile(extractedExe)) {
+            throw new Error(`Archive does not contain ${binaryFilename('win32')}`);
+          }
+          renameSync(extractedExe, tmpPath);
+        } finally {
+          rmSync(tmpZip, { force: true });
+          rmSync(extractDir, { recursive: true, force: true });
+        }
       }
     } else {
       const binaryBuf = extractBinaryFromTarGz(archiveBuffer, binaryFilename());
@@ -307,7 +411,7 @@ async function downloadAndInstallBinary(
       }
     }
 
-    renameSync(tmpPath, destPath);
+    replaceFileSync(tmpPath, destPath);
     if (destPath === managedBinaryPath()) {
       writeFileSync(managedBinaryVersionPath(), `${PLUGIN_VERSION}\n`, 'utf8');
     }
@@ -341,15 +445,139 @@ function resolveService(ctx: any, serviceName: string): any {
   }
 }
 
+export interface ScanProgressState {
+  active: boolean;
+  completed: number;
+  total: number;
+  agent: string;
+  currentBytes: number;
+  updatedAt: number;
+}
+
+export function resolveSpawnSpec(
+  binaryPath: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform === 'win32' && /\.(?:m?js|cjs)$/i.test(binaryPath)) {
+    return { command: process.execPath, args: [binaryPath, ...args] };
+  }
+  return { command: binaryPath, args };
+}
+
 async function runCliJson<T = unknown>(
   config: DshPluginConfig | undefined,
   args: string[],
 ): Promise<T> {
   const binaryPath = await ensureBinaryPath(config);
-  const { stdout } = await execFileAsync(binaryPath, [...args, '--json'], {
+  const spec = resolveSpawnSpec(binaryPath, [...args, '--json']);
+  const { stdout } = await execFileAsync(spec.command, spec.args, {
     maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function runCliJsonWithProgress<T = unknown>(
+  config: DshPluginConfig | undefined,
+  args: string[],
+  onProgress?: (progress: {
+    completed: number;
+    total: number;
+    agent: string;
+    currentBytes: number;
+  }) => void,
+): Promise<T> {
+  const binaryPath = await ensureBinaryPath(config);
+  const spec = resolveSpawnSpec(binaryPath, [...args, '--json']);
+  return new Promise<T>((resolve, reject) => {
+    const child = spawn(spec.command, spec.args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const stdoutChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrTail = '';
+    const stderrLines: string[] = [];
+    let settled = false;
+    const MAX_STDOUT = 16 * 1024 * 1024;
+
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      stdoutBytes += buf.length;
+      if (stdoutBytes > MAX_STDOUT) {
+        child.kill();
+        fail(new Error('CLI stdout exceeded maxBuffer'));
+        return;
+      }
+      stdoutChunks.push(buf);
+    });
+
+    const handleStderrLine = (rawLine: string) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      stderrLines.push(line);
+      if (stderrLines.length > 50) stderrLines.shift();
+      if (!onProgress) return;
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          typeof parsed.completed === 'number' &&
+          typeof parsed.total === 'number' &&
+          typeof parsed.agent === 'string'
+        ) {
+          onProgress({
+            completed: parsed.completed,
+            total: parsed.total,
+            agent: parsed.agent,
+            currentBytes: typeof parsed.currentBytes === 'number' ? parsed.currentBytes : 0,
+          });
+        }
+      } catch {
+        // ignore non-JSON stderr diagnostic lines
+      }
+    };
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrTail += (Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)).toString('utf8');
+      let nl = stderrTail.indexOf('\n');
+      while (nl !== -1) {
+        handleStderrLine(stderrTail.slice(0, nl));
+        stderrTail = stderrTail.slice(nl + 1);
+        nl = stderrTail.indexOf('\n');
+      }
+    });
+
+    child.on('error', (err) => fail(err));
+
+    child.on('close', (code) => {
+      if (stderrTail.trim()) {
+        handleStderrLine(stderrTail);
+        stderrTail = '';
+      }
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        const tailMsg = stderrLines.slice(-5).join(' | ');
+        reject(new Error(`agent-cleaner exited with code ${code}${tailMsg ? `: ${tailMsg}` : ''}`));
+        return;
+      }
+      try {
+        const out = Buffer.concat(stdoutChunks).toString('utf8');
+        resolve(JSON.parse(out) as T);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  });
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -359,6 +587,119 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
     'x-content-type-options': 'nosniff',
   });
   res.end(JSON.stringify(payload));
+}
+
+function buildConfigCliArgs(body: Record<string, any>): string[] {
+  const action = typeof body.action === 'string' ? body.action.trim() : '';
+  if (action === 'get') {
+    return ['config', 'show'];
+  }
+  if (
+    action === 'ignore_path' ||
+    action === 'unignore_path' ||
+    action === 'ignore_agent' ||
+    action === 'unignore_agent'
+  ) {
+    const pattern = typeof body.pattern === 'string' ? body.pattern.trim() : '';
+    if (!pattern) {
+      throw new Error('pattern is required');
+    }
+    const sub = action.endsWith('_agent') ? 'ignore-agent' : 'ignore';
+    const op = action.startsWith('unignore_') ? 'remove' : 'add';
+    return ['config', sub, op, pattern];
+  }
+  if (action && action !== 'set') {
+    throw new Error(`Unsupported config action: ${action}`);
+  }
+
+  const cliArgs = ['config', 'set'];
+  const exemptHours = body.exemptHours ?? body.exempt_hours;
+  if (typeof exemptHours === 'number' && Number.isFinite(exemptHours) && exemptHours >= 0) {
+    cliArgs.push('--exempt-hours', String(Math.floor(exemptHours)));
+  }
+  const coldDays =
+    body.coldThresholdDays ?? body.cold_threshold_days ?? body.coldDays ?? body.cold_days;
+  if (typeof coldDays === 'number' && Number.isFinite(coldDays) && coldDays >= 0) {
+    cliArgs.push('--cold-days', String(Math.floor(coldDays)));
+  }
+  if (body.lang === 'zh' || body.lang === 'en') {
+    cliArgs.push('--lang', body.lang);
+  }
+  const trashMaxAgeDays = body.trashMaxAgeDays ?? body.trash_max_age_days;
+  if (
+    typeof trashMaxAgeDays === 'number' &&
+    Number.isFinite(trashMaxAgeDays) &&
+    trashMaxAgeDays >= 0
+  ) {
+    cliArgs.push('--trash-max-age-days', String(Math.floor(trashMaxAgeDays)));
+  }
+  const trashMaxSizeMb = body.trashMaxSizeMb ?? body.trash_max_size_mb;
+  if (
+    typeof trashMaxSizeMb === 'number' &&
+    Number.isFinite(trashMaxSizeMb) &&
+    trashMaxSizeMb >= 0
+  ) {
+    cliArgs.push('--trash-max-size-mb', String(Math.floor(trashMaxSizeMb)));
+  }
+  const autoPruneTrash = body.autoPruneTrash ?? body.auto_prune_trash;
+  if (typeof autoPruneTrash === 'boolean') {
+    cliArgs.push('--auto-prune-trash', String(autoPruneTrash));
+  }
+  const backupMaxCount = body.backupMaxCount ?? body.backup_max_count;
+  if (
+    typeof backupMaxCount === 'number' &&
+    Number.isFinite(backupMaxCount) &&
+    backupMaxCount >= 0
+  ) {
+    cliArgs.push('--backup-max-count', String(Math.floor(backupMaxCount)));
+  }
+  return cliArgs;
+}
+
+function buildDoctorCliArgs(body: { fix?: boolean; issueIds?: unknown }): string[] {
+  const ids = Array.isArray(body.issueIds)
+    ? body.issueIds.map(String).filter((s) => s.trim().length > 0)
+    : [];
+  const shouldFix = Boolean(body.fix) || ids.length > 0;
+  const cliArgs = ['doctor'];
+  if (shouldFix) {
+    cliArgs.push('--fix');
+    if (ids.length > 0) {
+      cliArgs.push('--ids', ids.join(','));
+    }
+  }
+  return cliArgs;
+}
+
+function buildBackupsCliArgs(args: {
+  action?: string;
+  backupId?: string;
+  keepCount?: number;
+  keep?: number;
+}): string[] {
+  const action = typeof args.action === 'string' && args.action ? args.action.trim() : 'list';
+  if (action === 'list') return ['backups', 'list'];
+  if (action === 'restore') {
+    if (typeof args.backupId !== 'string' || !args.backupId.trim()) {
+      throw new Error('backupId is required');
+    }
+    return ['backups', 'restore', args.backupId.trim()];
+  }
+  if (action === 'delete') {
+    if (typeof args.backupId !== 'string' || !args.backupId.trim()) {
+      throw new Error('backupId is required');
+    }
+    return ['backups', 'delete', args.backupId.trim()];
+  }
+  if (action === 'prune') {
+    const cliArgs = ['backups', 'prune'];
+    const keep = args.keepCount ?? args.keep;
+    if (typeof keep === 'number' && Number.isFinite(keep) && keep >= 0) {
+      cliArgs.push('--keep', String(Math.floor(keep)));
+    }
+    return cliArgs;
+  }
+  throw new Error(`Unsupported backups action: ${action}`);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, any>> {
@@ -408,44 +749,72 @@ function registerHttpRoutes(
     let overviewCache: { key: string; data: Record<string, unknown> } | null = null;
     let overviewEpoch = 0;
     const inFlightOverview = new Map<string, Promise<Record<string, unknown>>>();
+    let scanProgress: ScanProgressState = {
+      active: false,
+      completed: 0,
+      total: 0,
+      agent: '',
+      currentBytes: 0,
+      updatedAt: 0,
+    };
+    const progressClients = new Set<ServerResponse>();
+
+    const emitProgress = (next: ScanProgressState) => {
+      scanProgress = next;
+      const chunk = `data: ${JSON.stringify(next)}\n\n`;
+      for (const client of progressClients) {
+        try {
+          client.write(chunk);
+        } catch {
+          progressClients.delete(client);
+        }
+      }
+    };
 
     const invalidateOverviewCache = () => {
       overviewEpoch += 1;
       overviewCache = null;
     };
 
+    const checkConnectionRejection = (req: IncomingMessage, res: ServerResponse): boolean => {
+      let refused: number | undefined;
+      try {
+        refused = connection.requestRejection(req);
+      } catch {
+        refused = 403;
+      }
+      if (refused !== undefined) {
+        if (typeof req.resume === 'function') req.resume();
+        sendJson(res, refused, {
+          ok: false,
+          error: refused === 401 ? 'Unauthorized' : 'Forbidden',
+        });
+        return true;
+      }
+      return false;
+    };
+
     const mount = () => {
       const route = (
         routePath: string,
-        method: 'GET' | 'POST',
+        methods: 'GET' | 'POST' | Array<'GET' | 'POST'>,
         fn: (body: Record<string, any>, req: IncomingMessage) => Promise<unknown>,
-      ) =>
-        webServer.register({
+      ) => {
+        const allowed = Array.isArray(methods) ? methods : [methods];
+        return webServer.register({
           kind: 'exact',
           path: routePath,
           handler: async (req: IncomingMessage, res: ServerResponse) => {
-            let refused: number | undefined;
-            try {
-              refused = connection.requestRejection(req);
-            } catch {
-              refused = 403;
-            }
-            if (refused !== undefined) {
-              if (typeof req.resume === 'function') req.resume();
-              sendJson(res, refused, {
-                ok: false,
-                error: refused === 401 ? 'Unauthorized' : 'Forbidden',
-              });
-              return;
-            }
+            if (checkConnectionRejection(req, res)) return;
 
-            if (req.method !== method) {
-              res.writeHead(405, { allow: method });
+            const reqMethod = (req.method ?? 'GET').toUpperCase();
+            if (!allowed.includes(reqMethod as 'GET' | 'POST')) {
+              res.writeHead(405, { allow: allowed.join(', ') });
               res.end();
               return;
             }
 
-            if (method === 'POST') {
+            if (reqMethod === 'POST') {
               const mediaType = String(req.headers['content-type'] ?? '')
                 .split(';')[0]
                 ?.trim()
@@ -461,7 +830,7 @@ function registerHttpRoutes(
             }
 
             try {
-              const body = method === 'POST' ? await readJsonBody(req) : {};
+              const body = reqMethod === 'POST' ? await readJsonBody(req) : {};
               const data = await fn(body, req);
               sendJson(res, 200, { ok: true, data });
             } catch (err) {
@@ -472,8 +841,60 @@ function registerHttpRoutes(
             }
           },
         });
+      };
+
+      const progressDisposer = webServer.register({
+        kind: 'exact',
+        path: '/agent-cleaner/api/progress',
+        handler: async (req: IncomingMessage, res: ServerResponse) => {
+          if (checkConnectionRejection(req, res)) return;
+
+          if ((req.method ?? 'GET').toUpperCase() !== 'GET') {
+            res.writeHead(405, { allow: 'GET' });
+            res.end();
+            return;
+          }
+
+          const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+          const wantsSse =
+            String(req.headers.accept ?? '').includes('text/event-stream') ||
+            url.searchParams.get('stream') === '1';
+
+          if (!wantsSse) {
+            sendJson(res, 200, { ok: true, data: scanProgress });
+            return;
+          }
+
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-store',
+            connection: 'keep-alive',
+            'x-content-type-options': 'nosniff',
+          });
+          res.write(`data: ${JSON.stringify(scanProgress)}\n\n`);
+          progressClients.add(res);
+          const cleanup = () => {
+            progressClients.delete(res);
+          };
+          req.on('close', cleanup);
+          res.on('close', cleanup);
+        },
+      });
+
+      const closeSseClients = () => {
+        for (const client of progressClients) {
+          try {
+            client.end();
+          } catch {
+            // ignore
+          }
+        }
+        progressClients.clear();
+      };
 
       return [
+        progressDisposer,
+        closeSseClients,
         route('/agent-cleaner/api/overview', 'GET', async (_body, req) => {
           const url = new URL(req.url ?? '/', 'http://127.0.0.1');
           const hours = Number(url.searchParams.get('hours') ?? defaultHours);
@@ -493,26 +914,55 @@ function registerHttpRoutes(
           const epoch = overviewEpoch;
           const job = (async () => {
             await ensureBinaryPath(config);
-            const [agents, doctors, mcpAudit, trash] = await Promise.all([
-              runCliJson(config, ['scan', '--older-than', `${safeHours}h`, '--lang', lang]),
-              runCliJson(config, ['doctor']),
-              runCliJson(config, ['mcp']),
-              runCliJson(config, ['restore']),
-            ]);
-            const payload = {
-              agents,
-              doctors,
-              mcpAudit,
-              trash,
-              disk: getDiskSpace(),
-              exemptHours: safeHours,
-              lang,
-              scannedAt: Date.now(),
-            };
-            if (overviewEpoch === epoch) {
-              overviewCache = { key, data: payload };
+            emitProgress({
+              active: true,
+              completed: 0,
+              total: 0,
+              agent: '',
+              currentBytes: 0,
+              updatedAt: Date.now(),
+            });
+            try {
+              const [agents, doctors, mcpAudit, trash] = await Promise.all([
+                runCliJsonWithProgress(
+                  config,
+                  ['scan', '--older-than', `${safeHours}h`, '--lang', lang, '--progress-json'],
+                  (prog) => {
+                    emitProgress({
+                      active: true,
+                      completed: prog.completed,
+                      total: prog.total,
+                      agent: prog.agent,
+                      currentBytes: prog.currentBytes,
+                      updatedAt: Date.now(),
+                    });
+                  },
+                ),
+                runCliJson(config, ['doctor']),
+                runCliJson(config, ['mcp']),
+                runCliJson(config, ['restore']),
+              ]);
+              const payload = {
+                agents,
+                doctors,
+                mcpAudit,
+                trash,
+                disk: getDiskSpace(),
+                exemptHours: safeHours,
+                lang,
+                scannedAt: Date.now(),
+              };
+              if (overviewEpoch === epoch) {
+                overviewCache = { key, data: payload };
+              }
+              return payload;
+            } finally {
+              emitProgress({
+                ...scanProgress,
+                active: false,
+                updatedAt: Date.now(),
+              });
             }
-            return payload;
           })().finally(() => {
             if (inFlightOverview.get(key) === job) {
               inFlightOverview.delete(key);
@@ -522,7 +972,44 @@ function registerHttpRoutes(
           inFlightOverview.set(key, job);
           return job;
         }),
+        route('/agent-cleaner/api/config', ['GET', 'POST'], async (body, req) => {
+          if ((req.method ?? 'GET').toUpperCase() === 'GET') {
+            return runCliJson(config, ['config', 'show']);
+          }
+          const cliArgs = buildConfigCliArgs(body);
+          const result = await runCliJson(config, cliArgs);
+          invalidateOverviewCache();
+          return result;
+        }),
+        route('/agent-cleaner/api/backups', 'GET', () => runCliJson(config, ['backups', 'list'])),
+        route('/agent-cleaner/api/backup-restore', 'POST', async (body) => {
+          const cliArgs = buildBackupsCliArgs({ action: 'restore', backupId: body.backupId });
+          const result = await runCliJson(config, cliArgs);
+          invalidateOverviewCache();
+          return result;
+        }),
+        route('/agent-cleaner/api/backup-delete', 'POST', async (body) => {
+          const cliArgs = buildBackupsCliArgs({ action: 'delete', backupId: body.backupId });
+          const result = await runCliJson(config, cliArgs);
+          invalidateOverviewCache();
+          return result;
+        }),
+        route('/agent-cleaner/api/backup-prune', 'POST', async (body) => {
+          const cliArgs = buildBackupsCliArgs({
+            action: 'prune',
+            keepCount: body.keepCount,
+            keep: body.keep,
+          });
+          const result = await runCliJson(config, cliArgs);
+          invalidateOverviewCache();
+          return result;
+        }),
         route('/agent-cleaner/api/trash', 'GET', () => runCliJson(config, ['restore'])),
+        route('/agent-cleaner/api/trash-prune', 'POST', async () => {
+          const result = await runCliJson(config, ['restore', '--prune']);
+          invalidateOverviewCache();
+          return result;
+        }),
         route('/agent-cleaner/api/clean', 'POST', async (body) => {
           const hours =
             typeof body.exemptHours === 'number' && body.exemptHours >= 0
@@ -540,8 +1027,9 @@ function registerHttpRoutes(
           if (!body.dryRun) invalidateOverviewCache();
           return result;
         }),
-        route('/agent-cleaner/api/doctor-fix', 'POST', async () => {
-          const result = await runCliJson(config, ['doctor', '--fix']);
+        route('/agent-cleaner/api/doctor-fix', 'POST', async (body) => {
+          const cliArgs = buildDoctorCliArgs({ fix: true, issueIds: body.issueIds });
+          const result = await runCliJson(config, cliArgs);
           invalidateOverviewCache();
           return result;
         }),
@@ -597,6 +1085,32 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
   if (!tools || typeof tools.register !== 'function') return;
 
   tools.register({
+    name: 'agent_cleaner_overview',
+    description:
+      'Get an aggregated overview of disk usage, reclaimable artifacts, config doctor issues, MCP audit, and trash batches.',
+    parameters: {
+      type: 'object',
+      properties: {
+        olderThanHours: {
+          type: 'number',
+          description: `Exempt items modified within this many hours (default: ${defaultHours})`,
+        },
+        lang: {
+          type: 'string',
+          enum: ['zh', 'en'],
+          description: 'Optional output language (zh or en)',
+        },
+      },
+    },
+    output: buildTextOutputSpec(),
+    execute: (args: { olderThanHours?: number; lang?: 'zh' | 'en' } = {}) => {
+      const cliArgs = ['overview', '--older-than', `${args.olderThanHours ?? defaultHours}h`];
+      if (args.lang === 'zh' || args.lang === 'en') cliArgs.push('--lang', args.lang);
+      return runCliJson(config, cliArgs);
+    },
+  });
+
+  tools.register({
     name: 'agent_cleaner_scan',
     description:
       'Scan disk usage, bloated cache/snapshots, orphan sessions, and MCP health across AI coding agents.',
@@ -611,12 +1125,18 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
           type: 'string',
           description: 'Optional agent filter (e.g. claude, opencode, codex, dsh)',
         },
+        lang: {
+          type: 'string',
+          enum: ['zh', 'en'],
+          description: 'Optional output language (zh or en)',
+        },
       },
     },
     output: buildTextOutputSpec(),
-    execute: (args: { olderThanHours?: number; agent?: string } = {}) => {
+    execute: (args: { olderThanHours?: number; agent?: string; lang?: 'zh' | 'en' } = {}) => {
       const cliArgs = ['scan', '--older-than', `${args.olderThanHours ?? defaultHours}h`];
       if (args.agent) cliArgs.push('--agent', args.agent);
+      if (args.lang === 'zh' || args.lang === 'en') cliArgs.push('--lang', args.lang);
       return runCliJson(config, cliArgs);
     },
   });
@@ -624,7 +1144,7 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
   tools.register({
     name: 'agent_cleaner_clean',
     description:
-      'Move reclaimable agent files and caches into the reversible trash (~/.agent-cleaner/trash/).',
+      'Move reclaimable agent files and caches into the reversible trash (~/.agent-cleaner/trash/), or permanently delete when permanent=true.',
     parameters: {
       type: 'object',
       properties: {
@@ -640,6 +1160,15 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
           type: 'boolean',
           description: 'Preview cleanup without moving files',
         },
+        permanent: {
+          type: 'boolean',
+          description: 'Permanently delete selected items without moving to trash',
+        },
+        lang: {
+          type: 'string',
+          enum: ['zh', 'en'],
+          description: 'Optional output language (zh or en)',
+        },
         selectedIds: {
           type: 'array',
           items: { type: 'string' },
@@ -653,12 +1182,16 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
         olderThanHours?: number;
         onlyRecommended?: boolean;
         dryRun?: boolean;
+        permanent?: boolean;
+        lang?: 'zh' | 'en';
         selectedIds?: string[];
       } = {},
     ) => {
       const cliArgs = ['clean', '--yes', '--older-than', `${args.olderThanHours ?? defaultHours}h`];
       if (args.onlyRecommended) cliArgs.push('--only-recommended');
       if (args.dryRun) cliArgs.push('--dry-run');
+      if (args.permanent) cliArgs.push('--permanent');
+      if (args.lang === 'zh' || args.lang === 'en') cliArgs.push('--lang', args.lang);
       if (args.selectedIds?.length) cliArgs.push('--ids', args.selectedIds.join(','));
       return runCliJson(config, cliArgs);
     },
@@ -667,7 +1200,7 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
   tools.register({
     name: 'agent_cleaner_doctor',
     description:
-      'Diagnose syntax and dead MCP links across AI agent configs, optionally auto-fixing while preserving comments.',
+      'Diagnose syntax and dead MCP links across AI agent configs, optionally auto-fixing all or selected issueIds while preserving comments.',
     parameters: {
       type: 'object',
       properties: {
@@ -675,12 +1208,16 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
           type: 'boolean',
           description: 'Auto-repair fixable issues after backing up original configs',
         },
+        issueIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional specific doctor issue IDs to repair selectively',
+        },
       },
     },
     output: buildTextOutputSpec(),
-    execute: (args: { fix?: boolean } = {}) => {
-      const cliArgs = ['doctor'];
-      if (args.fix) cliArgs.push('--fix');
+    execute: (args: { fix?: boolean; issueIds?: string[] } = {}) => {
+      const cliArgs = buildDoctorCliArgs(args);
       return runCliJson(config, cliArgs);
     },
   });
@@ -688,13 +1225,13 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
   tools.register({
     name: 'agent_cleaner_mcp',
     description:
-      'Audit cross-agent MCP configurations, cold npx/uv caches, and optionally terminate PPID=1 orphan processes.',
+      'Audit cross-agent MCP configurations, conflicts, cold npx/uv caches, and optionally terminate orphan stdio processes.',
     parameters: {
       type: 'object',
       properties: {
         kill: {
           type: 'boolean',
-          description: 'Terminate detected PPID=1 orphan stdio MCP processes',
+          description: 'Terminate detected orphan stdio MCP processes',
         },
         pid: {
           type: 'number',
@@ -716,7 +1253,7 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
   tools.register({
     name: 'agent_cleaner_restore',
     description:
-      'List reversible trash batches (~/.agent-cleaner/trash/), restore a specific batch back to original paths, or permanently purge trash.',
+      'List reversible trash batches (~/.agent-cleaner/trash/), restore a specific batch, prune expired/over-quota batches, or permanently purge trash.',
     parameters: {
       type: 'object',
       properties: {
@@ -732,6 +1269,10 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
           type: 'boolean',
           description: 'Set true to permanently purge ALL trash batches',
         },
+        prune: {
+          type: 'boolean',
+          description: 'Prune expired or over-quota trash batches per config.toml',
+        },
       },
     },
     output: buildTextOutputSpec(),
@@ -740,12 +1281,66 @@ export function apply(ctx: any, config?: DshPluginConfig): void {
         batchId?: string;
         purgeBatchId?: string;
         purgeAll?: boolean;
+        prune?: boolean;
       } = {},
     ) => {
+      if (args.prune) return runCliJson(config, ['restore', '--prune']);
       if (args.purgeAll) return runCliJson(config, ['restore', '--purge-all']);
       if (args.purgeBatchId) return runCliJson(config, ['restore', '--purge', args.purgeBatchId]);
       if (args.batchId) return runCliJson(config, ['restore', args.batchId]);
       return runCliJson(config, ['restore']);
+    },
+  });
+
+  tools.register({
+    name: 'agent_cleaner_config',
+    description:
+      'Read or update ~/.agent-cleaner/config.toml settings and ignored path/agent whitelist.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['get', 'set', 'ignore_path', 'unignore_path', 'ignore_agent', 'unignore_agent'],
+        },
+        pattern: { type: 'string' },
+        exemptHours: { type: 'number' },
+        coldThresholdDays: { type: 'number' },
+        lang: { type: 'string', enum: ['zh', 'en'] },
+        trashMaxAgeDays: { type: 'number' },
+        trashMaxSizeMb: { type: 'number' },
+        autoPruneTrash: { type: 'boolean' },
+        backupMaxCount: { type: 'number' },
+      },
+    },
+    output: buildTextOutputSpec(),
+    execute: (args: Record<string, any> = {}) => {
+      const cliArgs = buildConfigCliArgs({ action: 'get', ...args });
+      return runCliJson(config, cliArgs);
+    },
+  });
+
+  tools.register({
+    name: 'agent_cleaner_backups',
+    description:
+      'List, restore, delete, or prune saved configuration backups (~/.agent-cleaner/backups/).',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'restore', 'delete', 'prune'],
+        },
+        backupId: { type: 'string' },
+        keepCount: { type: 'number' },
+      },
+    },
+    output: buildTextOutputSpec(),
+    execute: (
+      args: { action?: string; backupId?: string; keepCount?: number } = {},
+    ) => {
+      const cliArgs = buildBackupsCliArgs(args);
+      return runCliJson(config, cliArgs);
     },
   });
 }

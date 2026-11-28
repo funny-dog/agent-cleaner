@@ -12,14 +12,14 @@ DeepSeek Harness (DSH) 磁盘清理与配置自愈插件。无需离开 DSH，�
 
 ## 功能特性
 
-- **DSH 侧边栏可视化面板**：从左侧栏打开 **Agent Cleaner**，直观查看各工具磁盘占用分布，按「推荐清理 / 建议复核 / 活跃豁免（24h）」筛选，支持按项勾选清理。
-- **内置 4 个对话工具**：向 DSH 注册 `agent_cleaner_scan`、`agent_cleaner_clean`、`agent_cleaner_doctor`、`agent_cleaner_mcp`，可以直接在对话里让 DSH 帮你干活：
+- **DSH 侧边栏可视化面板**：从左侧栏打开 **Agent Cleaner**，在雷达遮罩中实时查看扫描进度，查看各工具磁盘占用分布，按「推荐清理 / 建议复核 / 活跃豁免（24h）」筛选，支持条目卡片快捷「忽略此路径」、移入回收站或彻底删除。
+- **内置 8 个对话工具（Cordis Tools）**：向 DSH 注册 `agent_cleaner_overview`、`agent_cleaner_scan`、`agent_cleaner_clean`、`agent_cleaner_doctor`、`agent_cleaner_mcp`、`agent_cleaner_restore`、`agent_cleaner_config`、`agent_cleaner_backups`，可直接在对话中操控：
   - *“帮我扫描一下各 AI 编程助手占用的冗余空间和孤儿 MCP 进程”*
-  - *“检查并修复 MCP 配置文件里的死链”*
-- **可逆回收站时光机**：所有清理均先移入 `~/.agent-cleaner/trash/<batchId>/` 并留存清单，随时可在「回收站」标签页一键原路还原。
-- **24 小时活跃保护**：默认豁免最近 24 小时内修改过的文件，避免误删当前工作会话。
-- **孤儿 MCP 雷达**：精准识别父进程已退出的 `PPID=1` 僵尸 stdio MCP 进程，不误杀 SSE/HTTP 常驻服务。
-- **保注释配置自愈**：无损修复 JSON、JSONC、TOML、YAML 配置文件中的失效 MCP 路径，修改前自动备份到 `~/.agent-cleaner/backups/`。
+  - *“检查跨 Agent 的 MCP 冲突与死链并选择性修复”*
+- **设置 / 白名单标签页**：在面板内直接管理 `exempt_hours`、`cold_threshold_days`、`trash_max_age_days`、`trash_max_size_mb`、`backup_max_count`、`auto_prune_trash` 以及 `ignored_paths`、`ignored_agents`。
+- **可逆回收站与过期淘汰**：清理项先移入 `~/.agent-cleaner/trash/<batchId>/` 并留存清单，展示保留策略与容量上限，支持「立即清理过期批次」与一键原路还原。
+- **孤儿 MCP 与冲突雷达**：识别跨 Agent 同名冲突（`conflicts`）、重复配置、冷缓存及孤儿 stdio MCP 进程（支持 Unix `PPID=1` 与 Windows 父进程已退出检测），不误杀 SSE/HTTP 常驻服务。
+- **保注释选择性自愈与备份回滚**：支持全局或按单条问题单独「修复」JSON、JSONC、TOML、YAML 中的失效配置并保留注释，在「配置自愈」标签页直接浏览历史备份与一键回滚。
 
 ## 安装方式
 
@@ -39,7 +39,7 @@ dsh plugin --profile web add dsh-agent-cleaner
 dsh plugin --profile web add github:funny-dog/agent-cleaner#path:/plugins/dsh
 ```
 
-> **开箱即用**：首次触发扫描时，插件会自动拉取适配当前系统的预编译引擎到 `~/.agent-cleaner/bin/`，无需本地安装 Rust 工具链。
+> **开箱即用（支持 macOS / Linux / Windows）**：首次触发扫描时，插件会自动下载并原生解压适配当前系统的预编译引擎（`.tar.gz` / `.zip`）到 `~/.agent-cleaner/bin/`，无需本地安装 Rust 工具链。
 
 ### 多平台一键插件注入与独立命令行（`npx` / `npm`）
 

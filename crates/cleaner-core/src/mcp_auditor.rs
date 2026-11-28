@@ -21,17 +21,88 @@ pub(crate) struct RawMcpServer {
     pub url: Option<String>,
 }
 
-fn candidate_exists_in_dir(dir: &Path, bin: &str) -> bool {
-    if dir.join(bin).is_file() {
+fn path_exists_as_executable(p: &Path) -> bool {
+    if p.is_file() {
         return true;
     }
     #[cfg(windows)]
     {
-        if dir.join(format!("{bin}.exe")).is_file() {
-            return true;
+        if p.extension().is_none() {
+            let raw = p.to_string_lossy();
+            let pathext =
+                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD;.PS1".to_string());
+            for ext in pathext.split(';').map(str::trim).filter(|e| !e.is_empty()) {
+                let with_ext = if ext.starts_with('.') {
+                    format!("{raw}{ext}")
+                } else {
+                    format!("{raw}.{ext}")
+                };
+                if Path::new(&with_ext).is_file() {
+                    return true;
+                }
+            }
+            for ext in [".exe", ".cmd", ".bat", ".ps1", ".com"] {
+                if Path::new(&format!("{raw}{ext}")).is_file() {
+                    return true;
+                }
+            }
         }
     }
     false
+}
+
+fn candidate_exists_in_dir(dir: &Path, bin: &str) -> bool {
+    path_exists_as_executable(&dir.join(bin))
+}
+
+fn expand_command_vars(raw: &str) -> String {
+    let mut out = raw.to_string();
+    let lower = out.to_ascii_lowercase();
+    for key in [
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ] {
+        let token_lower = format!("%{}%", key.to_ascii_lowercase());
+        if lower.contains(&token_lower) {
+            let val = std::env::var(key).ok().or_else(|| {
+                if key == "USERPROFILE" {
+                    dirs::home_dir().map(|h| h.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            });
+            if let Some(replacement) = val {
+                while let Some(idx) = out.to_ascii_lowercase().find(&token_lower) {
+                    out.replace_range(idx..idx + token_lower.len(), &replacement);
+                }
+            }
+        }
+    }
+    if let Some(rest) = out.strip_prefix("~/").or_else(|| out.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest).to_string_lossy().to_string();
+        }
+    }
+    out
+}
+
+fn extract_first_command_token(trimmed: &str) -> &str {
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        if let Some(end) = rest.find('"') {
+            return &rest[..end];
+        }
+        return rest;
+    }
+    if let Some(rest) = trimmed.strip_prefix('\'') {
+        if let Some(end) = rest.find('\'') {
+            return &rest[..end];
+        }
+        return rest;
+    }
+    trimmed.split_whitespace().next().unwrap_or("")
 }
 
 fn push_versioned_bin_dirs(base: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
@@ -39,7 +110,11 @@ fn push_versioned_bin_dirs(base: &Path, suffix: &str, out: &mut Vec<PathBuf>) {
         return;
     };
     for entry in entries.flatten() {
-        let candidate = entry.path().join(suffix);
+        let candidate = if suffix.is_empty() {
+            entry.path()
+        } else {
+            entry.path().join(suffix)
+        };
         if candidate.is_dir() {
             out.push(candidate);
         }
@@ -52,31 +127,30 @@ pub(crate) fn command_exists(cmd: &str) -> bool {
         return false;
     }
 
-    let raw_path = Path::new(trimmed);
-    if raw_path.is_absolute() && raw_path.exists() {
+    let unquoted_full = trimmed.trim_matches(['"', '\'']);
+    let expanded_full = expand_command_vars(unquoted_full);
+    let raw_path = Path::new(&expanded_full);
+    if raw_path.is_absolute() && path_exists_as_executable(raw_path) {
         return true;
     }
 
-    let bin = trimmed.split_whitespace().next().unwrap_or("");
+    let first_tok = extract_first_command_token(trimmed);
+    if first_tok.is_empty() {
+        return false;
+    }
+    let bin = expand_command_vars(first_tok);
     if bin.is_empty() {
         return false;
     }
 
-    if let Some(rest) = bin.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest).is_file();
-        }
-        return false;
-    }
-
-    let path = Path::new(bin);
+    let path = Path::new(&bin);
     if path.is_absolute() {
-        return path.exists();
+        return path_exists_as_executable(path);
     }
 
     if let Some(path_var) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path_var) {
-            if candidate_exists_in_dir(&dir, bin) {
+            if candidate_exists_in_dir(&dir, &bin) {
                 return true;
             }
         }
@@ -87,31 +161,81 @@ pub(crate) fn command_exists(cmd: &str) -> bool {
         PathBuf::from("/opt/homebrew/sbin"),
         PathBuf::from("/usr/local/bin"),
     ];
+    for env_key in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(pf) = std::env::var_os(env_key) {
+            fallback_dirs.push(PathBuf::from(pf).join("nodejs"));
+        }
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let lad = PathBuf::from(local_app_data);
+        fallback_dirs.push(lad.join("Volta/bin"));
+        fallback_dirs.push(lad.join("Programs/Microsoft VS Code/bin"));
+        fallback_dirs.push(lad.join("Microsoft/WindowsApps"));
+        push_versioned_bin_dirs(&lad.join("Programs/Python"), "", &mut fallback_dirs);
+        push_versioned_bin_dirs(&lad.join("Programs/Python"), "Scripts", &mut fallback_dirs);
+    }
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        fallback_dirs.push(PathBuf::from(app_data).join("Python/Scripts"));
+    }
     if let Some(home) = dirs::home_dir() {
         for rel in [
             ".local/bin",
+            ".local/share/mise/shims",
+            ".local/share/pnpm",
+            "Library/pnpm",
+            "AppData/Local/pnpm",
+            "AppData/Roaming/npm",
+            "AppData/Roaming/Python/Scripts",
+            "AppData/Local/Microsoft/WinGet/Links",
+            "AppData/Local/Volta/bin",
+            "AppData/Local/Programs/Microsoft VS Code/bin",
+            "AppData/Local/Microsoft/WindowsApps",
+            "scoop/shims",
+            ".npm-global/bin",
+            ".yarn/bin",
+            ".config/yarn/global/node_modules/.bin",
             ".cargo/bin",
             ".bun/bin",
             ".deno/bin",
             ".volta/bin",
             ".asdf/shims",
             ".pyenv/shims",
+            ".pixi/bin",
             "go/bin",
         ] {
             fallback_dirs.push(home.join(rel));
         }
         push_versioned_bin_dirs(&home.join(".nvm/versions/node"), "bin", &mut fallback_dirs);
-        push_versioned_bin_dirs(&home.join(".fnm/node-versions"), "installation/bin", &mut fallback_dirs);
+        push_versioned_bin_dirs(
+            &home.join(".fnm/node-versions"),
+            "installation/bin",
+            &mut fallback_dirs,
+        );
         push_versioned_bin_dirs(
             &home.join("Library/Application Support/fnm/node-versions"),
             "installation/bin",
+            &mut fallback_dirs,
+        );
+        push_versioned_bin_dirs(
+            &home.join("AppData/Roaming/fnm/node-versions"),
+            "installation/bin",
+            &mut fallback_dirs,
+        );
+        push_versioned_bin_dirs(
+            &home.join("AppData/Local/Programs/Python"),
+            "",
+            &mut fallback_dirs,
+        );
+        push_versioned_bin_dirs(
+            &home.join("AppData/Local/Programs/Python"),
+            "Scripts",
             &mut fallback_dirs,
         );
     }
 
     fallback_dirs
         .iter()
-        .any(|dir| candidate_exists_in_dir(dir, bin))
+        .any(|dir| candidate_exists_in_dir(dir, &bin))
 }
 
 fn detect_transport(
@@ -151,7 +275,12 @@ fn extract_string_array(val: Option<&serde_json::Value>) -> Option<Vec<String>> 
 
 pub(crate) fn extract_server_spec(
     obj: &serde_json::Map<String, serde_json::Value>,
-) -> (McpTransport, Option<String>, Option<Vec<String>>, Option<String>) {
+) -> (
+    McpTransport,
+    Option<String>,
+    Option<Vec<String>>,
+    Option<String>,
+) {
     let url = obj
         .get("url")
         .and_then(|v| v.as_str())
@@ -393,9 +522,10 @@ pub fn parse_mcp_entries(config_path: &Path) -> Vec<McpEntry> {
             return extract_entries_from_json_value(&val, config_path, &agent);
         }
     } else if lower.ends_with(".json") || lower.ends_with(".jsonc") {
-        if let Ok(Some(val)) =
-            jsonc_parser::parse_to_serde_value::<Option<serde_json::Value>>(&raw, &Default::default())
-        {
+        if let Ok(Some(val)) = jsonc_parser::parse_to_serde_value::<Option<serde_json::Value>>(
+            &raw,
+            &Default::default(),
+        ) {
             return extract_entries_from_json_value(&val, config_path, &agent);
         }
     }
@@ -435,7 +565,10 @@ pub fn known_config_paths(ctx: &CleanerContext) -> Vec<PathBuf> {
         ctx.home_dir.join(".copilot/mcp-config.json"),
         ctx.home_dir.join(".zcode/mcp.json"),
         ctx.home_dir.join(".codebuddy/mcp.json"),
-        ctx.home_dir.join("Library/Application Support/Zed/settings.json"),
+        ctx.home_dir
+            .join("Library/Application Support/Zed/settings.json"),
+        ctx.home_dir.join(".config/zed/settings.json"),
+        ctx.home_dir.join("AppData/Roaming/Zed/settings.json"),
     ];
     for variant in [
         "Claude",
@@ -446,12 +579,9 @@ pub fn known_config_paths(ctx: &CleanerContext) -> Vec<PathBuf> {
         "Claude-wb-cn-3p",
         "MultiClaude",
     ] {
-        paths.push(
-            ctx.home_dir
-                .join("Library/Application Support")
-                .join(variant)
-                .join("claude_desktop_config.json"),
-        );
+        for dir in crate::targets::platform_support_dirs(ctx, variant) {
+            paths.push(dir.join("claude_desktop_config.json"));
+        }
     }
     paths.extend(custom_target_mcp_configs(ctx));
     paths.extend(discover_dynamic_mcp_configs(ctx));
@@ -512,26 +642,32 @@ fn extract_effective_arg_needles(args: &[String]) -> Vec<String> {
     needles
 }
 
+fn path_basename_no_win_ext(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches(['"', '\'']);
+    let base = trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    for ext in [".exe", ".cmd", ".bat", ".ps1"] {
+        if let Some(stripped) = base.strip_suffix(ext) {
+            return stripped.to_string();
+        }
+    }
+    base
+}
+
 fn entry_matches_process_cmd(entry: &McpEntry, proc_cmd: &str) -> bool {
     let Some(cmd_raw) = entry.command.as_deref() else {
         return false;
     };
-    let cmd_str = cmd_raw.trim();
+    let cmd_str = cmd_raw.trim().trim_matches(['"', '\'']);
     if cmd_str.is_empty() {
         return false;
     }
-    let basename = Path::new(cmd_str)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(cmd_str)
-        .strip_suffix(".exe")
-        .unwrap_or_else(|| {
-            Path::new(cmd_str)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(cmd_str)
-        });
-    let is_generic = GENERIC_RUNNERS.contains(&basename.to_ascii_lowercase().as_str());
+    let basename = path_basename_no_win_ext(cmd_str);
+    let is_generic = GENERIC_RUNNERS.contains(&basename.as_str());
+    let proc_norm = proc_cmd.replace('\\', "/").to_ascii_lowercase();
 
     let effective_args = entry
         .args
@@ -540,34 +676,49 @@ fn entry_matches_process_cmd(entry: &McpEntry, proc_cmd: &str) -> bool {
         .unwrap_or_default();
 
     if is_generic && !effective_args.is_empty() {
-        return effective_args
-            .iter()
-            .any(|needle| proc_cmd.contains(needle.as_str()));
+        return effective_args.iter().any(|needle| {
+            let needle_norm = needle.replace('\\', "/").to_ascii_lowercase();
+            proc_norm.contains(&needle_norm)
+        });
     }
 
-    if proc_cmd.contains(cmd_str) {
+    let cmd_norm = cmd_str.replace('\\', "/").to_ascii_lowercase();
+    if proc_norm.contains(&cmd_norm) {
         return true;
     }
 
     if !is_generic && basename.len() >= 4 {
-        if let Some(first_tok) = proc_cmd.split_whitespace().next() {
-            let proc_base = Path::new(first_tok)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(first_tok);
-            if proc_base == basename {
-                return true;
-            }
+        let first_tok = extract_first_command_token(proc_cmd.trim());
+        if !first_tok.is_empty() && path_basename_no_win_ext(first_tok) == basename {
+            return true;
         }
     }
 
     false
 }
 
+#[cfg(windows)]
+fn is_windows_orphan_process(sys: &System, proc_info: &sysinfo::Process) -> bool {
+    let Some(parent_pid) = proc_info.parent() else {
+        return false;
+    };
+    let ppid = parent_pid.as_u32();
+    if ppid <= 4 {
+        return false;
+    }
+    match sys.process(parent_pid) {
+        None => true,
+        Some(parent_proc) => parent_proc.start_time() > proc_info.start_time(),
+    }
+}
+
 pub fn scan_orphan_mcp_processes(entries: &[McpEntry]) -> Vec<McpProcessInfo> {
     let stdio_entries: Vec<&McpEntry> = entries
         .iter()
-        .filter(|e| e.transport == McpTransport::Stdio && e.command.as_deref().is_some_and(|c| !c.is_empty()))
+        .filter(|e| {
+            e.transport == McpTransport::Stdio
+                && e.command.as_deref().is_some_and(|c| !c.is_empty())
+        })
         .collect();
 
     let mut sys = System::new_with_specifics(
@@ -588,7 +739,11 @@ pub fn scan_orphan_mcp_processes(entries: &[McpEntry]) -> Vec<McpProcessInfo> {
     let mut orphans = Vec::new();
     for (pid, proc_info) in sys.processes() {
         let ppid = proc_info.parent().map(|p| p.as_u32()).unwrap_or(0);
-        if ppid != 1 {
+        #[cfg(unix)]
+        let is_orphan_parent = ppid == 1;
+        #[cfg(windows)]
+        let is_orphan_parent = is_windows_orphan_process(&sys, proc_info);
+        if !is_orphan_parent {
             continue;
         }
         let cmd_parts: Vec<String> = proc_info
@@ -611,7 +766,8 @@ pub fn scan_orphan_mcp_processes(entries: &[McpEntry]) -> Vec<McpProcessInfo> {
             || lower_cmd.contains("sse")
             || lower_cmd.contains("streamable-http");
         let by_marker = !is_remote_service
-            && (((lower_cmd.contains("@modelcontextprotocol") || lower_cmd.contains("mcp-server"))
+            && (((lower_cmd.contains("@modelcontextprotocol")
+                || lower_cmd.contains("mcp-server"))
                 && lower_cmd.contains("stdio"))
                 || lower_cmd.contains("fastmcp")
                 || lower_cmd.contains("mcp-proxy"));
@@ -646,6 +802,7 @@ pub fn audit_mcp(ctx: &CleanerContext) -> McpAuditReport {
         .collect();
 
     let mut groups: HashMap<String, Vec<McpEntry>> = HashMap::new();
+    let mut by_name: HashMap<String, Vec<McpEntry>> = HashMap::new();
     for entry in &entries {
         let target = entry
             .command
@@ -654,6 +811,10 @@ pub fn audit_mcp(ctx: &CleanerContext) -> McpAuditReport {
             .unwrap_or("");
         let key = format!("{}::{target}", entry.name);
         groups.entry(key).or_default().push(entry.clone());
+        by_name
+            .entry(entry.name.clone())
+            .or_default()
+            .push(entry.clone());
     }
 
     let duplicates: Vec<Vec<McpEntry>> = groups
@@ -661,6 +822,35 @@ pub fn audit_mcp(ctx: &CleanerContext) -> McpAuditReport {
         .filter(|group| {
             let agents: HashSet<&str> = group.iter().map(|e| e.agent.as_str()).collect();
             agents.len() > 1
+        })
+        .collect();
+
+    // Detect cross-agent MCP entries sharing the same server name but differing in command/args/url.
+    type McpSig<'a> = (
+        &'a str,
+        Option<&'a str>,
+        Option<&'a [String]>,
+        Option<&'a str>,
+    );
+    let conflicts: Vec<Vec<McpEntry>> = by_name
+        .into_values()
+        .filter(|group| {
+            let agents: HashSet<&str> = group.iter().map(|e| e.agent.as_str()).collect();
+            if agents.len() <= 1 {
+                return false;
+            }
+            let sigs: HashSet<McpSig<'_>> = group
+                .iter()
+                .map(|e| {
+                    let t = match e.transport {
+                        McpTransport::Stdio => "stdio",
+                        McpTransport::Sse => "sse",
+                        McpTransport::Http => "http",
+                    };
+                    (t, e.command.as_deref(), e.args.as_deref(), e.url.as_deref())
+                })
+                .collect();
+            sigs.len() > 1
         })
         .collect();
 
@@ -676,6 +866,7 @@ pub fn audit_mcp(ctx: &CleanerContext) -> McpAuditReport {
         entries,
         dead_links,
         duplicates,
+        conflicts,
         orphan_processes,
         cold_caches,
     }
@@ -683,7 +874,10 @@ pub fn audit_mcp(ctx: &CleanerContext) -> McpAuditReport {
 
 fn is_pid_alive(pid: u32) -> bool {
     let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), false);
+    sys.refresh_processes(
+        sysinfo::ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        false,
+    );
     sys.process(Pid::from_u32(pid)).is_some()
 }
 
@@ -716,17 +910,20 @@ pub fn kill_orphan_process(pid: u32) -> KillProcessResult {
             .status();
         thread::sleep(Duration::from_millis(200));
 
-        return KillProcessResult {
+        KillProcessResult {
             pid,
             success: !is_pid_alive(pid),
             method: "SIGKILL".to_string(),
-        };
+        }
     }
 
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string()])
+            .args(["/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
             .status();
         thread::sleep(Duration::from_millis(500));
         if !is_pid_alive(pid) {
@@ -737,14 +934,15 @@ pub fn kill_orphan_process(pid: u32) -> KillProcessResult {
             };
         }
         let _ = Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
             .status();
         thread::sleep(Duration::from_millis(200));
-        return KillProcessResult {
+        KillProcessResult {
             pid,
             success: !is_pid_alive(pid),
             method: "SIGKILL".to_string(),
-        };
+        }
     }
 }
 
@@ -772,7 +970,11 @@ mod tests {
     fn test_entry_matches_process_cmd_precision() {
         let npx_entry = mk_entry(
             "npx",
-            vec!["-y", "mcp-proxy-for-aws@latest", "https://aws-mcp.us-east-1.api.aws/mcp"],
+            vec![
+                "-y",
+                "mcp-proxy-for-aws@latest",
+                "https://aws-mcp.us-east-1.api.aws/mcp",
+            ],
         );
         assert!(entry_matches_process_cmd(
             &npx_entry,
@@ -799,5 +1001,16 @@ mod tests {
             "/Users/erhu/.dbx/bin/dbx-mcp --stdio"
         ));
         assert!(entry_matches_process_cmd(&bin_entry, "dbx-mcp --stdio"));
+
+        let win_npx_entry = mk_entry("npx.cmd", vec!["-y", "@scope\\pkg-mcp"]);
+        assert!(entry_matches_process_cmd(
+            &win_npx_entry,
+            r"C:\Program Files\nodejs\node.exe C:\Users\Alice\AppData\Local\npm-cache\_npx\123\node_modules\@scope\pkg-mcp\dist\index.js"
+        ));
+        let win_bin_entry = mk_entry(r"C:\Program Files\nodejs\node.exe", vec![]);
+        assert!(entry_matches_process_cmd(
+            &win_bin_entry,
+            r#""c:\program files\nodejs\node.exe" --stdio"#
+        ));
     }
 }

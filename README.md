@@ -18,11 +18,11 @@ AI coding agents leave behind gigabytes of shadow Git snapshots, orphaned sessio
 
 ## Key Safeguards
 
-- **Accurate Claude Code Orphan Detection**: Streams the first 30 lines of the latest `.jsonl` session file to read the real `cwd` rather than guessing from hyphenated folder names, and protects unmounted `/Volumes/*` and `/mnt/*` paths.
-- **Multi-Agent Coverage**: Scans OpenCode shadow Git snapshots, Codex session logs, undeclared DSH profile packages (including `@scope/pkg`), and cold (>14d) `npm/_npx` and `uv` caches.
-- **Comment-Preserving Config Doctor**: Uses CST/AST edits (`jsonc-parser`, `toml_edit`, `serde_yml`) to remove broken MCP entries without stripping comments, backing up files to `~/.agent-cleaner/backups/` beforehand.
-- **Orphan MCP Process Cleanup**: Identifies `PPID=1` stdio MCP processes via `sysinfo` and terminates them (`SIGTERM` -> `1.5s` -> `SIGKILL`) without touching SSE/HTTP daemons.
-- **Reversible Trash**: Exempts files modified within the last 24 hours by default. Cleaned items move to `~/.agent-cleaner/trash/<batchId>/` with cross-device (`EXDEV`) fallback and full batch restore (`ac restore <batchId>`).
+- **Accurate Claude Code Orphan Detection**: Streams the first 30 lines of the latest `.jsonl` session file to read the real `cwd` rather than guessing from hyphenated folder names, and protects unmounted `/Volumes/*`, `/mnt/*`, `/run/media/*`, and Windows drive/UNC paths.
+- **Multi-Agent & Windows Coverage**: Scans OpenCode shadow Git snapshots, Codex session logs, undeclared DSH profile packages (including `@scope/pkg`), cold (`>14d`) `npm/_npx` / `uv` / `pnpm` / `playwright` caches, and Windows `AppData/Roaming` & `AppData/Local` app/MCP locations.
+- **Comment-Preserving Config Doctor & Backup Rollback**: Uses CST/AST edits (`jsonc-parser`, `toml_edit`, `serde_yml`) to selectively or globally remove broken MCP entries without stripping comments, backing up files to `~/.agent-cleaner/backups/` with one-click restore (`ac backups restore <id>`).
+- **Orphan MCP Process & Conflict Audit**: Detects cross-agent MCP `duplicates` and `conflicts`, identifies orphan stdio MCP processes (Unix `PPID=1` and Windows exited-parent processes) via `sysinfo`, and terminates them gracefully (`SIGTERM` -> `SIGKILL` on Unix, `taskkill /T` -> `/F /T` on Windows) without touching SSE/HTTP daemons.
+- **Reversible Trash & Retention Policy**: Exempts files modified within the last 24 hours and paths matching `ignored_paths` in `~/.agent-cleaner/config.toml`. Cleaned items move to `~/.agent-cleaner/trash/<batchId>/` with drive-safe relative paths, cross-device fallback, configurable age/size pruning (`ac restore --prune`), and full batch restore (`ac restore <batchId>`).
 
 ## Repository Layout
 
@@ -77,13 +77,19 @@ Run `ac` with no arguments to view the overview dashboard and enter the interact
 
 ```bash
 ac                  # Interactive wizard menu (or overview summary in non-TTY pipes)
-ac scan
+ac overview         # Aggregated disk, doctor, MCP, and trash overview
+ac scan [--progress-json]
 ac clean --dry-run
 ac clean --only-recommended
-ac doctor --fix
+ac doctor --fix [--ids <id1,id2>]
 ac mcp --kill
 ac restore <batchId>
+ac restore --prune
+ac config [show|set|ignore|ignore-agent]
+ac backups [list|restore <id>|delete <id>|prune]
 ```
+
+Built-in Stdio MCP Server (`ac mcp-server` / `npx -y dsh-agent-cleaner mcp-server`) exposes 8 tools: `cleaner_overview`, `cleaner_scan`, `cleaner_clean`, `cleaner_doctor`, `cleaner_mcp_audit`, `cleaner_restore`, `cleaner_config`, and `cleaner_backups`.
 
 ### 2. Plugins (No Global CLI Required)
 

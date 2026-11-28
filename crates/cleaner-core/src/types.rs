@@ -21,7 +21,7 @@ pub struct CleanerContext {
 
 impl Default for CleanerContext {
     fn default() -> Self {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        let home_dir = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
         Self {
             home_dir,
             now_ms: None,
@@ -132,6 +132,18 @@ pub struct ScanResult {
     pub scanned_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgress {
+    #[specta(type = u32)]
+    pub completed: usize,
+    #[specta(type = u32)]
+    pub total: usize,
+    pub agent: String,
+    #[specta(type = f64)]
+    pub current_bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanOptions {
@@ -204,6 +216,46 @@ pub struct RestoreReport {
     pub failed: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneTrashReport {
+    #[specta(type = u32)]
+    pub pruned_batches: usize,
+    #[specta(type = f64)]
+    pub freed_bytes: u64,
+    pub pruned_batch_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupEntry {
+    pub id: String,
+    pub original_path: String,
+    pub backup_path: String,
+    #[specta(type = f64)]
+    pub size_bytes: u64,
+    #[specta(type = f64)]
+    pub created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestoreReport {
+    pub id: String,
+    pub original_path: String,
+    pub backup_path: String,
+    pub restored: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneBackupsReport {
+    #[specta(type = u32)]
+    pub pruned_count: usize,
+    #[specta(type = f64)]
+    pub freed_bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum McpTransport {
@@ -255,6 +307,8 @@ pub struct McpAuditReport {
     pub entries: Vec<McpEntry>,
     pub dead_links: Vec<McpEntry>,
     pub duplicates: Vec<Vec<McpEntry>>,
+    #[serde(default)]
+    pub conflicts: Vec<Vec<McpEntry>>,
     pub orphan_processes: Vec<McpProcessInfo>,
     pub cold_caches: Vec<ColdCacheEntry>,
 }

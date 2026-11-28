@@ -12,14 +12,14 @@ Supports **Claude Code**, **OpenCode**, **Codex CLI**, **DSH**, **Gemini / Antig
 
 ## What You Get
 
-- **Visual Cleanup Panel in DSH**: Open **Agent Cleaner** from the left sidebar to inspect disk usage by tool, filter by `Recommended` / `Optional` / `Active Guard (24h)`, and clean selected items.
-- **Built-in DSH Agent Tools**: Registers `agent_cleaner_scan`, `agent_cleaner_clean`, `agent_cleaner_doctor`, and `agent_cleaner_mcp` so you can simply ask DSH in chat:
+- **Visual Cleanup Panel in DSH**: Open **Agent Cleaner** from the left sidebar to watch live scan progress in the radar overlay, inspect disk usage by tool, filter by `Recommended` / `Optional` / `Active Guard (24h)`, ignore paths with one click, and clean or permanently delete selected items.
+- **Built-in DSH Agent Tools (8 Cordis Tools)**: Registers `agent_cleaner_overview`, `agent_cleaner_scan`, `agent_cleaner_clean`, `agent_cleaner_doctor`, `agent_cleaner_mcp`, `agent_cleaner_restore`, `agent_cleaner_config`, and `agent_cleaner_backups` so you can ask DSH in chat:
   - *"Scan my AI coding tool caches and tell me what can be safely cleaned."*
-  - *"Check for orphan MCP processes and broken MCP configs."*
-- **Reversible Trash**: Items are moved to `~/.agent-cleaner/trash/<batchId>/` instead of being permanently deleted, so you can restore any batch from the **Trash** tab at any time.
-- **24h Active Guard**: Files modified within the last 24 hours are protected by default.
-- **Orphan MCP Process Radar**: Detects and terminates `PPID=1` zombie stdio MCP processes without touching active SSE/HTTP services.
-- **Comment-Preserving Config Doctor**: Repairs invalid MCP links across JSON, JSONC, TOML, and YAML configs while preserving comments and backups (`~/.agent-cleaner/backups/`).
+  - *"Check for orphan MCP processes, cross-agent conflicts, and broken MCP configs."*
+- **Settings & Whitelist Tab**: Configure `exempt_hours`, `cold_threshold_days`, `trash_max_age_days`, `trash_max_size_mb`, `backup_max_count`, `auto_prune_trash`, `ignored_paths`, and `ignored_agents` directly from the UI.
+- **Reversible Trash & Retention Pruning**: Items move to `~/.agent-cleaner/trash/<batchId>/` with configurable age/size retention policies, one-click expired batch pruning, and full restore from the **Trash** tab.
+- **Orphan MCP & Conflict Radar**: Detects cross-agent MCP `conflicts`, `duplicates`, cold caches, and orphan stdio MCP processes (Unix `PPID=1` and Windows exited-parent processes) without touching active SSE/HTTP services.
+- **Selective Config Doctor & Backup Rollback**: Repairs all or individual `autoFixable` MCP issues across JSON, JSONC, TOML, and YAML configs while preserving comments, with a **Config Backup History & Rollback** view in the **Config Doctor** tab.
 
 ## Installation
 
@@ -39,7 +39,7 @@ Or install directly from the GitHub repository subpath:
 dsh plugin --profile web add github:funny-dog/agent-cleaner#path:/plugins/dsh
 ```
 
-> **Zero Setup**: On first scan, the plugin automatically downloads the matching prebuilt `agent-cleaner` engine for your OS/architecture into `~/.agent-cleaner/bin/`. No Rust toolchain is required.
+> **Zero Setup (macOS / Linux / Windows)**: On first scan, the plugin automatically downloads and extracts the matching prebuilt `agent-cleaner` engine (`.tar.gz` or `.zip`) for your OS/architecture into `~/.agent-cleaner/bin/`. No Rust toolchain is required.
 
 ### Cross-Platform Plugin Injector & Standalone CLI (`npx` / `npm`)
 

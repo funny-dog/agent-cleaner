@@ -39,7 +39,7 @@ fn default_category() -> String {
 }
 
 pub fn expand_tilde(ctx: &CleanerContext, raw: &str) -> PathBuf {
-    if let Some(rest) = raw.strip_prefix("~/") {
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
         ctx.home_dir.join(rest)
     } else if raw == "~" {
         ctx.home_dir.clone()
@@ -121,11 +121,9 @@ pub fn scan_custom_targets(
             .iter()
             .map(|c| {
                 let path = expand_tilde(ctx, &c.path);
-                let desc = c.description.clone().unwrap_or_else(|| {
-                    match lang {
-                        Language::Zh => format!("{id} 自定义规则目录"),
-                        Language::En => format!("{id} custom rule directory"),
-                    }
+                let desc = c.description.clone().unwrap_or_else(|| match lang {
+                    Language::Zh => format!("{id} 自定义规则目录"),
+                    Language::En => format!("{id} custom rule directory"),
                 });
                 (path, parse_category(&c.category), desc)
             })
@@ -261,6 +259,41 @@ const NON_AGENT_XDG_DIRS: &[&str] = &[
     "tree-sitter",
 ];
 
+const NON_AGENT_WINDOWS_DIRS: &[&str] = &[
+    "microsoft",
+    "windows",
+    "packages",
+    "temp",
+    "programs",
+    "google",
+    "mozilla",
+    "nvidia",
+    "intel",
+    "amd",
+    "apple",
+    "npm-cache",
+    "npm",
+    "pip",
+    "uv",
+    "pnpm",
+    "ms-playwright",
+    "d3dscache",
+    "crashdumps",
+    "squirreltemp",
+    "elevateddiagnostics",
+    "comms",
+    "connecteddevicesplatform",
+    "onedrive",
+    "publishers",
+    "cef",
+    "discord",
+    "slack",
+    "spotify",
+    "steam",
+    "vscode",
+    "code",
+];
+
 const AGENT_MARKER_FILES: &[&str] = &[
     "mcp.json",
     "mcp_config.json",
@@ -338,7 +371,13 @@ fn normalize_agent_id(raw: &str) -> String {
         .unwrap_or(&trimmed);
     trimmed
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string()
@@ -392,7 +431,26 @@ fn name_matches_agent_keyword(name: &str) -> bool {
         return true;
     }
     // Match *agent (e.g. sheetagent, myagent) only on non-Apple bundles.
-    tokens.iter().any(|t| t.ends_with("agent") || t.starts_with("agent"))
+    tokens
+        .iter()
+        .any(|t| t.ends_with("agent") || t.starts_with("agent"))
+}
+
+fn normalize_claim_key(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let stripped = raw
+        .strip_prefix(r"\\?\UNC\")
+        .or_else(|| raw.strip_prefix(r"\\?\"))
+        .unwrap_or(&raw);
+    let norm = stripped
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    if cfg!(windows) {
+        norm.to_ascii_lowercase()
+    } else {
+        norm
+    }
 }
 
 fn is_path_claimed(candidate: &Path, claimed: &HashSet<PathBuf>) -> bool {
@@ -403,6 +461,21 @@ fn is_path_claimed(candidate: &Path, claimed: &HashSet<PathBuf>) -> bool {
         if claimed.contains(&canon) {
             return true;
         }
+    }
+    if cfg!(windows) {
+        let cand_norm = normalize_claim_key(candidate);
+        let cand_canon = fs::canonicalize(candidate)
+            .ok()
+            .map(|p| normalize_claim_key(&p));
+        return claimed.iter().any(|c| {
+            let c_norm = normalize_claim_key(c);
+            let prefix = format!("{c_norm}/");
+            cand_norm == c_norm
+                || cand_norm.starts_with(&prefix)
+                || cand_canon
+                    .as_ref()
+                    .is_some_and(|cc| cc == &c_norm || cc.starts_with(&prefix))
+        });
     }
     claimed.iter().any(|c| candidate.starts_with(c))
 }
@@ -427,21 +500,27 @@ fn has_agent_markers(dir: &Path) -> bool {
 fn classify_cleanable_subdir(name: &str) -> Option<(ScanCategory, &'static str, &'static str)> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "logs" | "log" | "diagnostics" => {
-            Some((ScanCategory::Log, "自动发现运行日志", "auto-discovered runtime logs"))
-        }
+        "logs" | "log" | "diagnostics" => Some((
+            ScanCategory::Log,
+            "自动发现运行日志",
+            "auto-discovered runtime logs",
+        )),
         "tmp" | "temp" | ".tmp" | "crash" | "crashes" | "crashpad" => Some((
             ScanCategory::Tmp,
             "自动发现临时/崩溃缓存",
             "auto-discovered temp/crash artifacts",
         )),
         "cache" | "caches" | "code cache" | "gpucache" | "cacheddata" | "graphitedawncache"
-        | "dawngraphitecache" | "dawnwebgpucache" => {
-            Some((ScanCategory::Cache, "自动发现缓存目录", "auto-discovered cache directory"))
-        }
-        "backup" | "backups" | "config-backups" => {
-            Some((ScanCategory::Backup, "自动发现历史备份", "auto-discovered historical backups"))
-        }
+        | "dawngraphitecache" | "dawnwebgpucache" => Some((
+            ScanCategory::Cache,
+            "自动发现缓存目录",
+            "auto-discovered cache directory",
+        )),
+        "backup" | "backups" | "config-backups" => Some((
+            ScanCategory::Backup,
+            "自动发现历史备份",
+            "auto-discovered historical backups",
+        )),
         "updates" => Some((
             ScanCategory::Updater,
             "自动发现更新器缓存",
@@ -599,7 +678,10 @@ pub fn discover_unknown_agent_results(
 
     for (parent, kind) in [
         (ctx.home_dir.join(".config"), DiscoveryRootKind::Standard),
-        (ctx.home_dir.join(".local/share"), DiscoveryRootKind::Standard),
+        (
+            ctx.home_dir.join(".local/share"),
+            DiscoveryRootKind::Standard,
+        ),
         (ctx.home_dir.join(".cache"), DiscoveryRootKind::CacheRoot),
     ] {
         if let Ok(entries) = fs::read_dir(&parent) {
@@ -627,9 +709,18 @@ pub fn discover_unknown_agent_results(
     }
 
     for (parent, kind) in [
-        (ctx.home_dir.join("Library/Application Support"), DiscoveryRootKind::Standard),
-        (ctx.home_dir.join("Library/Caches"), DiscoveryRootKind::CacheRoot),
-        (ctx.home_dir.join("Library/Logs"), DiscoveryRootKind::LogRoot),
+        (
+            ctx.home_dir.join("Library/Application Support"),
+            DiscoveryRootKind::Standard,
+        ),
+        (
+            ctx.home_dir.join("Library/Caches"),
+            DiscoveryRootKind::CacheRoot,
+        ),
+        (
+            ctx.home_dir.join("Library/Logs"),
+            DiscoveryRootKind::LogRoot,
+        ),
     ] {
         if let Ok(entries) = fs::read_dir(&parent) {
             for entry in entries.flatten() {
@@ -645,6 +736,34 @@ pub fn discover_unknown_agent_results(
                     let id = normalize_agent_id(&name);
                     if !id.is_empty() {
                         candidates.push((id, path, kind));
+                    }
+                }
+            }
+        }
+    }
+
+    for parent in [
+        ctx.home_dir.join("AppData/Roaming"),
+        ctx.home_dir.join("AppData/Local"),
+    ] {
+        if let Ok(entries) = fs::read_dir(&parent) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(ft) = entry.file_type() else {
+                    continue;
+                };
+                if !ft.is_dir() || ft.is_symlink() || is_path_claimed(&path, &claimed) {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                let lower = name.to_ascii_lowercase();
+                if NON_AGENT_WINDOWS_DIRS.contains(&lower.as_str()) {
+                    continue;
+                }
+                if name_matches_agent_keyword(&name) || has_agent_markers(&path) {
+                    let id = normalize_agent_id(&name);
+                    if !id.is_empty() {
+                        candidates.push((id, path, DiscoveryRootKind::Standard));
                     }
                 }
             }
@@ -672,9 +791,17 @@ pub fn discover_unknown_agent_results(
                 let (cat, zh, en) = if dir_name.to_ascii_lowercase().contains("updater")
                     || dir_name.to_ascii_lowercase().contains("shipit")
                 {
-                    (ScanCategory::Updater, "自动发现更新器缓存", "auto-discovered updater cache")
+                    (
+                        ScanCategory::Updater,
+                        "自动发现更新器缓存",
+                        "auto-discovered updater cache",
+                    )
                 } else {
-                    (ScanCategory::Cache, "自动发现系统应用缓存", "auto-discovered application cache")
+                    (
+                        ScanCategory::Cache,
+                        "自动发现系统应用缓存",
+                        "auto-discovered application cache",
+                    )
                 };
                 if let Some(item) = make_heuristic_item(
                     &agent_id,
@@ -761,7 +888,9 @@ pub fn discover_dynamic_mcp_configs(ctx: &CleanerContext) -> Vec<PathBuf> {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.starts_with('.') || NON_AGENT_DOTDIRS.contains(&name.to_ascii_lowercase().as_str()) {
+            if !name.starts_with('.')
+                || NON_AGENT_DOTDIRS.contains(&name.to_ascii_lowercase().as_str())
+            {
                 continue;
             }
             for fname in candidate_names {
@@ -796,28 +925,37 @@ pub fn discover_dynamic_mcp_configs(ctx: &CleanerContext) -> Vec<PathBuf> {
         }
     }
 
-    if let Ok(entries) = fs::read_dir(ctx.home_dir.join("Library/Application Support")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            for rel in ["claude_desktop_config.json", "User/mcp.json"] {
-                let p = path.join(rel);
-                if p.is_file() {
-                    found.push(p);
+    for app_root in [
+        ctx.home_dir.join("Library/Application Support"),
+        ctx.home_dir.join("AppData/Roaming"),
+        ctx.home_dir.join(".config"),
+    ] {
+        if let Ok(entries) = fs::read_dir(&app_root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
                 }
-            }
-            let global_storage = path.join("User/globalStorage");
-            for ext_id in [
-                "saoudrizwan.claude-dev",
-                "rooveterinaryinc.roo-cline",
-                "kilocode.kilo-code",
-            ] {
-                for settings_file in ["cline_mcp_settings.json", "mcp_settings.json"] {
-                    let p = global_storage.join(ext_id).join("settings").join(settings_file);
+                for rel in ["claude_desktop_config.json", "User/mcp.json"] {
+                    let p = path.join(rel);
                     if p.is_file() {
                         found.push(p);
+                    }
+                }
+                let global_storage = path.join("User/globalStorage");
+                for ext_id in [
+                    "saoudrizwan.claude-dev",
+                    "rooveterinaryinc.roo-cline",
+                    "kilocode.kilo-code",
+                ] {
+                    for settings_file in ["cline_mcp_settings.json", "mcp_settings.json"] {
+                        let p = global_storage
+                            .join(ext_id)
+                            .join("settings")
+                            .join(settings_file);
+                        if p.is_file() {
+                            found.push(p);
+                        }
                     }
                 }
             }

@@ -23,8 +23,7 @@ fn ctx() -> CleanerContext {
 }
 
 fn recompute_summary(report: &mut OverviewReport) {
-    report.summary.total_disk_usage_bytes =
-        report.agents.iter().map(|a| a.disk_usage_bytes).sum();
+    report.summary.total_disk_usage_bytes = report.agents.iter().map(|a| a.disk_usage_bytes).sum();
     report.summary.total_reclaimable_bytes = report.agents.iter().map(|a| a.total_bytes).sum();
     report.summary.recommended_bytes = report
         .agents
@@ -38,15 +37,15 @@ fn recompute_summary(report: &mut OverviewReport) {
 }
 
 fn apply_clean_to_overview(report: &mut OverviewReport, clean_report: &CleanReport) {
-    let failed_prefixes: Vec<String> = clean_report
-        .errors
-        .iter()
-        .filter_map(|e| e.split(':').next().map(|p| p.trim().to_string()))
-        .collect();
     let succeeded_ids: HashSet<&str> = clean_report
         .items
         .iter()
-        .filter(|item| !failed_prefixes.iter().any(|fp| fp == &item.path))
+        .filter(|item| {
+            !clean_report
+                .errors
+                .iter()
+                .any(|e| e == &item.path || e.starts_with(&format!("{}:", item.path)))
+        })
         .map(|item| item.id.as_str())
         .collect();
 
@@ -297,10 +296,7 @@ pub struct DiskSpace {
 #[tauri::command]
 #[specta::specta]
 pub fn get_disk_space() -> Result<DiskSpace, String> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| "home directory not found".to_string())?;
+    let home = CleanerContext::default().home_dir;
     let disks = sysinfo::Disks::new_with_refreshed_list();
     disks
         .list()

@@ -4,5 +4,6 @@ node_modules/
 /apps/desktop/dist/
 /apps/desktop/src-tauri/target/
 /plugins/dsh/dist/*.test.*
+/plugins/dsh/dist/client/
 .DS_Store
 *.log

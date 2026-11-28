@@ -1,4 +1,7 @@
-use super::{push_dir_item, AgentTarget};
+use super::{
+    platform_cache_dirs, platform_log_dirs, platform_support_dirs, push_desktop_cache_dirs,
+    push_dir_item, AgentTarget,
+};
 use crate::fs_safe::{
     extract_external_mountpoint, get_dir_size, get_file_size, is_mountpoint_accessible,
     safe_mtime_ms,
@@ -59,7 +62,11 @@ fn extract_pkg_from_hoisted_location_key(key: &str) -> Option<String> {
     }
 }
 
-fn collect_pkg_json_deps(pkg_json_path: &Path, include_dev: bool, include_bundles: bool) -> Vec<String> {
+fn collect_pkg_json_deps(
+    pkg_json_path: &Path,
+    include_dev: bool,
+    include_bundles: bool,
+) -> Vec<String> {
     let mut out = Vec::new();
     let Ok(raw) = fs::read_to_string(pkg_json_path) else {
         return out;
@@ -287,9 +294,16 @@ fn scan_dsh_sessions(
                     {
                         let encoded = encode_dsh_workspace_path(ws_path);
                         encoded_workspaces
-                            .entry(encoded)
+                            .entry(encoded.clone())
                             .or_default()
                             .push(ws_path.to_string());
+                        let colon_stripped = encoded.replace(':', "");
+                        if colon_stripped != encoded {
+                            encoded_workspaces
+                                .entry(colon_stripped)
+                                .or_default()
+                                .push(ws_path.to_string());
+                        }
                     }
                     if let Some(sess_arr) = ws_val.get("sessionIds").and_then(|s| s.as_array()) {
                         for sid in sess_arr.iter().filter_map(|v| v.as_str()) {
@@ -330,9 +344,9 @@ fn scan_dsh_sessions(
                     let mtime = safe_mtime_ms(&ws_session_dir, now_ms);
                     let missing_label = paths.join(", ");
                     let desc = match lang {
-                        Language::Zh => format!(
-                            "DSH 孤儿工作区会话 — 原项目目录已不存在: {missing_label}"
-                        ),
+                        Language::Zh => {
+                            format!("DSH 孤儿工作区会话 — 原项目目录已不存在: {missing_label}")
+                        }
                         Language::En => format!(
                             "Orphan DSH workspace sessions — project dir missing: {missing_label}"
                         ),
@@ -398,8 +412,7 @@ fn scan_dsh_sessions(
                     }
                 }
             }
-            let is_tmp_ws =
-                dir_name == "--private-tmp--" || dir_name.starts_with("--private-tmp-");
+            let is_tmp_ws = dir_name == "--private-tmp--" || dir_name.starts_with("--private-tmp-");
             if is_tmp_ws || !any_active_session {
                 let size = get_dir_size(&ws_session_dir);
                 if size > 0 {
@@ -432,15 +445,35 @@ impl AgentTarget for DshTarget {
     }
 
     fn claimed_dirs(&self, ctx: &CleanerContext) -> Vec<PathBuf> {
-        vec![
+        let mut dirs = vec![
             ctx.home_dir.join(".dsh"),
-            ctx.home_dir.join("Library/Application Support/@deepseek-ai"),
-            ctx.home_dir.join("Library/Application Support/com.deepseek.dsh"),
-            ctx.home_dir.join("Library/Caches/@deepseek-aidsh-desktop-updater"),
+            ctx.home_dir
+                .join("Library/Application Support/@deepseek-ai"),
+            ctx.home_dir
+                .join("Library/Application Support/com.deepseek.dsh"),
+            ctx.home_dir
+                .join("Library/Caches/@deepseek-aidsh-desktop-updater"),
             ctx.home_dir.join("Library/Caches/com.deepseek.dsh"),
             ctx.home_dir.join("Library/Caches/com.deepseek.dsh.ShipIt"),
             ctx.home_dir.join("Library/Logs/DeepSeek Harness"),
-        ]
+        ];
+        for app_name in [
+            "@deepseek-ai/dsh-desktop",
+            "com.deepseek.dsh",
+            "DeepSeek Harness",
+            "dsh-desktop",
+        ] {
+            for d in platform_support_dirs(ctx, app_name)
+                .into_iter()
+                .chain(platform_cache_dirs(ctx, app_name))
+                .chain(platform_log_dirs(ctx, app_name))
+            {
+                if !dirs.contains(&d) {
+                    dirs.push(d);
+                }
+            }
+        }
+        dirs
     }
 
     fn scan(&self, ctx: &CleanerContext, exempt_hours: u64, lang: Language) -> ScanResult {
@@ -485,7 +518,9 @@ impl AgentTarget for DshTarget {
                                     format!("DSH 配置 \"{profile_name}\" 备份文件: {bak_name}")
                                 }
                                 Language::En => {
-                                    format!("DSH profile \"{profile_name}\" backup file: {bak_name}")
+                                    format!(
+                                        "DSH profile \"{profile_name}\" backup file: {bak_name}"
+                                    )
                                 }
                             };
                             items.push(make_item(
@@ -556,14 +591,54 @@ impl AgentTarget for DshTarget {
 
         for support_root in [&app_support_desktop, &app_support_bundle] {
             for (sub, category, zh, en) in [
-                ("Cache", ScanCategory::Cache, "DeepSeek Harness 桌面端 HTTP 缓存", "DeepSeek Harness desktop HTTP cache"),
-                ("Code Cache", ScanCategory::Cache, "DeepSeek Harness 桌面端 JS 字节码缓存", "DeepSeek Harness desktop JS code cache"),
-                ("GPUCache", ScanCategory::Cache, "DeepSeek Harness 桌面端 GPU 渲染缓存", "DeepSeek Harness desktop GPU cache"),
-                ("GraphiteDawnCache", ScanCategory::Cache, "DeepSeek Harness 桌面端 GraphiteDawn 图形缓存", "DeepSeek Harness desktop GraphiteDawn cache"),
-                ("DawnWebGPUCache", ScanCategory::Cache, "DeepSeek Harness 桌面端 DawnWebGPU 图形缓存", "DeepSeek Harness desktop DawnWebGPU cache"),
-                ("DawnGraphiteCache", ScanCategory::Cache, "DeepSeek Harness 桌面端 DawnGraphite 图形缓存", "DeepSeek Harness desktop DawnGraphite cache"),
-                ("Crashpad", ScanCategory::Log, "DeepSeek Harness 桌面端崩溃转储日志", "DeepSeek Harness desktop crashpad logs"),
-                ("logs", ScanCategory::Log, "DeepSeek Harness 桌面端运行日志", "DeepSeek Harness desktop runtime logs"),
+                (
+                    "Cache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 HTTP 缓存",
+                    "DeepSeek Harness desktop HTTP cache",
+                ),
+                (
+                    "Code Cache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 JS 字节码缓存",
+                    "DeepSeek Harness desktop JS code cache",
+                ),
+                (
+                    "GPUCache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 GPU 渲染缓存",
+                    "DeepSeek Harness desktop GPU cache",
+                ),
+                (
+                    "GraphiteDawnCache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 GraphiteDawn 图形缓存",
+                    "DeepSeek Harness desktop GraphiteDawn cache",
+                ),
+                (
+                    "DawnWebGPUCache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 DawnWebGPU 图形缓存",
+                    "DeepSeek Harness desktop DawnWebGPU cache",
+                ),
+                (
+                    "DawnGraphiteCache",
+                    ScanCategory::Cache,
+                    "DeepSeek Harness 桌面端 DawnGraphite 图形缓存",
+                    "DeepSeek Harness desktop DawnGraphite cache",
+                ),
+                (
+                    "Crashpad",
+                    ScanCategory::Log,
+                    "DeepSeek Harness 桌面端崩溃转储日志",
+                    "DeepSeek Harness desktop crashpad logs",
+                ),
+                (
+                    "logs",
+                    ScanCategory::Log,
+                    "DeepSeek Harness 桌面端运行日志",
+                    "DeepSeek Harness desktop runtime logs",
+                ),
             ] {
                 push_dir_item(
                     &mut items,
@@ -661,13 +736,90 @@ impl AgentTarget for DshTarget {
             );
         }
 
+        let mut extra_dirs = Vec::new();
+        let builtin_handled: HashSet<PathBuf> = [
+            app_support_desktop.clone(),
+            app_support_bundle.clone(),
+            app_cache_dir.clone(),
+            dsh_logs_library.clone(),
+        ]
+        .into_iter()
+        .collect();
+        for app_name in [
+            "@deepseek-ai/dsh-desktop",
+            "com.deepseek.dsh",
+            "DeepSeek Harness",
+            "dsh-desktop",
+        ] {
+            for dir in platform_support_dirs(ctx, app_name) {
+                if !builtin_handled.contains(&dir) && !extra_dirs.contains(&dir) {
+                    push_desktop_cache_dirs(
+                        &mut items,
+                        "dsh",
+                        &dir,
+                        "DeepSeek Harness",
+                        "DeepSeek Harness",
+                        exempt_hours,
+                        now_ms,
+                        lang,
+                    );
+                    extra_dirs.push(dir);
+                }
+            }
+            for dir in platform_cache_dirs(ctx, app_name) {
+                if !builtin_handled.contains(&dir) && !extra_dirs.contains(&dir) {
+                    push_dir_item(
+                        &mut items,
+                        "dsh",
+                        &dir,
+                        ScanCategory::Cache,
+                        lang.tr(
+                            "DeepSeek Harness 桌面应用缓存",
+                            "DeepSeek Harness desktop cache",
+                        ),
+                        ItemStatus::Active,
+                        true,
+                        exempt_hours,
+                        now_ms,
+                        lang,
+                    );
+                    extra_dirs.push(dir);
+                }
+            }
+            for dir in platform_log_dirs(ctx, app_name) {
+                if !builtin_handled.contains(&dir) && !extra_dirs.contains(&dir) {
+                    push_dir_item(
+                        &mut items,
+                        "dsh",
+                        &dir,
+                        ScanCategory::Log,
+                        lang.tr(
+                            "DeepSeek Harness 系统运行日志",
+                            "DeepSeek Harness system logs",
+                        ),
+                        ItemStatus::Active,
+                        true,
+                        exempt_hours,
+                        now_ms,
+                        lang,
+                    );
+                    extra_dirs.push(dir);
+                }
+            }
+        }
+        let extra_usage: u64 = extra_dirs.iter().map(|d| get_dir_size(d)).sum();
+
         let disk_usage_bytes = get_dir_size(&dsh_dir)
-            + get_dir_size(&ctx.home_dir.join("Library/Application Support/@deepseek-ai"))
+            + get_dir_size(
+                &ctx.home_dir
+                    .join("Library/Application Support/@deepseek-ai"),
+            )
             + get_dir_size(&app_support_bundle)
             + get_dir_size(&app_cache_dir)
             + get_dir_size(&shipit_dir)
             + get_dir_size(&updater_dir)
-            + get_dir_size(&dsh_logs_library);
+            + get_dir_size(&dsh_logs_library)
+            + extra_usage;
         let total_bytes = items.iter().map(|i| i.size_bytes).sum();
 
         ScanResult {
