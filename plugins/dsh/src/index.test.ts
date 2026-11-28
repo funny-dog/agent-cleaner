@@ -910,21 +910,25 @@ test('dist/cli.js forwards arguments to managed native binary', async () => {
 });
 
 test('setup templates match universal plugin and root skills files', async () => {
-  const universalSkill = await fs.readFile(
-    new URL('../../../plugins/universal/skills/agent-cleaner/SKILL.md', import.meta.url),
-    'utf8',
+  const normEol = (s: string) => s.replace(/\r\n/g, '\n');
+  const universalSkill = normEol(
+    await fs.readFile(
+      new URL('../../../plugins/universal/skills/agent-cleaner/SKILL.md', import.meta.url),
+      'utf8',
+    ),
   );
-  const rootSkill = await fs.readFile(
-    new URL('../../../skills/agent-cleaner/SKILL.md', import.meta.url),
-    'utf8',
+  const rootSkill = normEol(
+    await fs.readFile(new URL('../../../skills/agent-cleaner/SKILL.md', import.meta.url), 'utf8'),
   );
   assert.equal(SKILL_MD_TEMPLATE, universalSkill);
   assert.equal(rootSkill, universalSkill);
 
   for (const [name, template] of Object.entries(COMMAND_TEMPLATES)) {
-    const onDisk = await fs.readFile(
-      new URL(`../../../plugins/universal/commands/${name}`, import.meta.url),
-      'utf8',
+    const onDisk = normEol(
+      await fs.readFile(
+        new URL(`../../../plugins/universal/commands/${name}`, import.meta.url),
+        'utf8',
+      ),
     );
     assert.equal(template, onDisk, `command template ${name} drifted from plugins/universal`);
   }

@@ -22,11 +22,11 @@ pub(crate) struct RawMcpServer {
 }
 
 fn path_exists_as_executable(p: &Path) -> bool {
-    if p.is_file() {
-        return true;
-    }
     #[cfg(windows)]
     {
+        if p.is_file() {
+            return true;
+        }
         if p.extension().is_none() {
             let raw = p.to_string_lossy();
             let pathext =
@@ -47,8 +47,12 @@ fn path_exists_as_executable(p: &Path) -> bool {
                 }
             }
         }
+        false
     }
-    false
+    #[cfg(not(windows))]
+    {
+        p.is_file()
+    }
 }
 
 fn candidate_exists_in_dir(dir: &Path, bin: &str) -> bool {

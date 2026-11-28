@@ -262,6 +262,7 @@ pub fn copy_recursive(src: &Path, dest: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
 fn clear_readonly_recursive(path: &Path) {
     let mut stack = vec![path.to_path_buf()];
     while let Some(cur) = stack.pop() {
