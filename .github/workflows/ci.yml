@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     strategy:
@@ -18,6 +22,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - if: matrix.os == 'ubuntu-24.04'
         run: cargo fmt --check
       - run: cargo clippy -p cleaner-core -p cleaner-cli --all-targets -- -D warnings
@@ -36,8 +41,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - run: npm run check:versions
-      - run: npm run typecheck
+      - if: matrix.os == 'ubuntu-24.04'
+        run: npm run check:versions
+      - if: matrix.os == 'ubuntu-24.04'
+        run: npm run typecheck
       - run: npm run build:plugins
       - run: npm --workspace=dsh-agent-cleaner test
-      - run: npm --workspace=@agent-cleaner/desktop run build
+      - if: matrix.os == 'ubuntu-24.04'
+        run: npm --workspace=@agent-cleaner/desktop run build

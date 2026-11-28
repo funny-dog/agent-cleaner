@@ -304,6 +304,13 @@ fn scan_dsh_sessions(
                                 .or_default()
                                 .push(ws_path.to_string());
                         }
+                        let colon_dashed = encoded.replace(':', "-");
+                        if colon_dashed != encoded {
+                            encoded_workspaces
+                                .entry(colon_dashed)
+                                .or_default()
+                                .push(ws_path.to_string());
+                        }
                     }
                     if let Some(sess_arr) = ws_val.get("sessionIds").and_then(|s| s.as_array()) {
                         for sid in sess_arr.iter().filter_map(|v| v.as_str()) {

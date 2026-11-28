@@ -23,6 +23,10 @@ fn old_ctx(home: &Path) -> CleanerContext {
     }
 }
 
+fn path_ends_with(path: &str, suffix: &str) -> bool {
+    Path::new(path).ends_with(suffix)
+}
+
 #[test]
 fn test_path_traversal_guard() {
     let root = Path::new("/tmp/trash");
@@ -44,7 +48,7 @@ fn test_claude_hyphen_protection_and_unmounted_guard() {
     fs::create_dir_all(&claude_real).unwrap();
     fs::write(
         claude_real.join("session.jsonl"),
-        format!("{{\"cwd\":\"{}\"}}\n", real_proj.display()),
+        format!("{}\n", json!({ "cwd": real_proj.to_string_lossy() })),
     )
     .unwrap();
 
@@ -54,7 +58,7 @@ fn test_claude_hyphen_protection_and_unmounted_guard() {
     fs::create_dir_all(&claude_orphan).unwrap();
     fs::write(
         claude_orphan.join("session.jsonl"),
-        format!("{{\"cwd\":\"{}\"}}\n", missing_proj.display()),
+        format!("{}\n", json!({ "cwd": missing_proj.to_string_lossy() })),
     )
     .unwrap();
 
@@ -517,20 +521,17 @@ hoistedLocations:
     fs::create_dir_all(&active_ws).unwrap();
     let missing_ws = home.join("workspaces/deleted-app");
 
-    let active_encoded = format!(
-        "--{}--",
-        active_ws
-            .to_string_lossy()
-            .trim_matches('/')
-            .replace('/', "-")
-    );
-    let missing_encoded = format!(
-        "--{}--",
-        missing_ws
-            .to_string_lossy()
-            .trim_matches('/')
-            .replace('/', "-")
-    );
+    let encode_ws = |p: &Path| {
+        format!(
+            "--{}--",
+            p.to_string_lossy()
+                .trim_matches(['/', '\\'])
+                .replace(['/', '\\'], "-")
+                .replace(':', "")
+        )
+    };
+    let active_encoded = encode_ws(&active_ws);
+    let missing_encoded = encode_ws(&missing_ws);
 
     let active_sess_dir = home.join(".dsh/sessions").join(&active_encoded);
     fs::create_dir_all(active_sess_dir.join("session-active-1")).unwrap();
@@ -627,7 +628,7 @@ hoistedLocations:
     let doctors = run_all_doctors(&ctx);
     let pkg_report = doctors
         .iter()
-        .find(|r| r.path.ends_with("profiles/desktop/package.json"))
+        .find(|r| path_ends_with(&r.path, "profiles/desktop/package.json"))
         .expect("DSH profile package.json should be inspected by doctor");
     assert!(!pkg_report.healthy);
     assert_eq!(pkg_report.issues.len(), 1);
@@ -692,55 +693,56 @@ fn test_brand_variants_claude_versions_and_lima_snapshots() {
     assert!(qoder
         .items
         .iter()
-        .any(|i| i.path.ends_with(".qoder-cn/logs")));
+        .any(|i| path_ends_with(&i.path, ".qoder-cn/logs")));
 
     let wb = results.iter().find(|r| r.agent == "workbuddy").unwrap();
     assert!(wb
         .items
         .iter()
-        .any(|i| i.path.ends_with(".workbuddy-ai/logs")));
+        .any(|i| path_ends_with(&i.path, ".workbuddy-ai/logs")));
 
     let kimi = results.iter().find(|r| r.agent == "kimi").unwrap();
     assert!(kimi
         .items
         .iter()
-        .any(|i| i.path.ends_with(".kimi-code/sessions")));
+        .any(|i| path_ends_with(&i.path, ".kimi-code/sessions")));
     assert!(kimi
         .items
         .iter()
-        .any(|i| i.path.ends_with(".kimi-code/search-index")));
+        .any(|i| path_ends_with(&i.path, ".kimi-code/search-index")));
 
     let claude = results.iter().find(|r| r.agent == "claude").unwrap();
     assert!(claude
         .items
         .iter()
-        .any(|i| i.path.ends_with("Claude-wb-cn-3p/Code Cache")));
-    assert!(claude
-        .items
-        .iter()
-        .any(|i| i.path.ends_with("claude-code/2.1.317") && i.category == ScanCategory::Updater));
+        .any(|i| path_ends_with(&i.path, "Claude-wb-cn-3p/Code Cache")));
+    assert!(claude.items.iter().any(|i| {
+        path_ends_with(&i.path, "claude-code/2.1.317") && i.category == ScanCategory::Updater
+    }));
     assert!(!claude
         .items
         .iter()
-        .any(|i| i.path.ends_with("claude-code/2.1.321")));
+        .any(|i| path_ends_with(&i.path, "claude-code/2.1.321")));
     assert!(!claude
         .items
         .iter()
-        .any(|i| i.path.ends_with("lima/_config")));
+        .any(|i| path_ends_with(&i.path, "lima/_config")));
     let base_vm = claude
         .items
         .iter()
-        .find(|i| i.path.ends_with("lima/base"))
+        .find(|i| path_ends_with(&i.path, "lima/base"))
         .unwrap();
     assert_eq!(base_vm.category, ScanCategory::Snapshot);
     assert_eq!(base_vm.recommendation, CleanRecommendation::Optional);
-    assert!(claude.items.iter().any(|i| i
-        .path
-        .ends_with(".claude-cage/state/lima/claude-cage-workspace-1")));
     assert!(claude
         .items
         .iter()
-        .any(|i| i.path.ends_with(".claude.json.backup") && i.category == ScanCategory::Backup));
+        .any(|i| { path_ends_with(&i.path, ".claude-cage/state/lima/claude-cage-workspace-1") }));
+    assert!(claude
+        .items
+        .iter()
+        .any(|i| path_ends_with(&i.path, ".claude.json.backup")
+            && i.category == ScanCategory::Backup));
 }
 
 #[test]
@@ -810,61 +812,59 @@ fn test_high_usage_subdirs_and_library_logs() {
     assert!(gemini
         .items
         .iter()
-        .any(|i| i.path.ends_with(".gemini/antigravity/log")));
+        .any(|i| path_ends_with(&i.path, ".gemini/antigravity/log")));
     assert!(gemini
         .items
         .iter()
-        .any(|i| i.path.ends_with(".gemini/antigravity/scratch")));
+        .any(|i| path_ends_with(&i.path, ".gemini/antigravity/scratch")));
+    assert!(gemini.items.iter().any(|i| {
+        path_ends_with(&i.path, ".gemini/antigravity/brain")
+            && i.recommendation == CleanRecommendation::Optional
+    }));
+    assert!(gemini.items.iter().any(|i| {
+        path_ends_with(&i.path, ".gemini/antigravity/conversations")
+            && i.recommendation == CleanRecommendation::Optional
+    }));
     assert!(gemini
         .items
         .iter()
-        .any(|i| i.path.ends_with(".gemini/antigravity/brain")
-            && i.recommendation == CleanRecommendation::Optional));
+        .any(|i| path_ends_with(&i.path, ".gemini/antigravity-cli/brain")));
     assert!(gemini
         .items
         .iter()
-        .any(|i| i.path.ends_with(".gemini/antigravity/conversations")
-            && i.recommendation == CleanRecommendation::Optional));
+        .any(|i| path_ends_with(&i.path, "Default/Code Cache")));
     assert!(gemini
         .items
         .iter()
-        .any(|i| i.path.ends_with(".gemini/antigravity-cli/brain")));
-    assert!(gemini
-        .items
-        .iter()
-        .any(|i| i.path.ends_with("Default/Code Cache")));
-    assert!(gemini
-        .items
-        .iter()
-        .any(|i| i.path.ends_with("Library/Logs/Antigravity")));
+        .any(|i| path_ends_with(&i.path, "Library/Logs/Antigravity")));
 
     let zcode = results.iter().find(|r| r.agent == "zcode").unwrap();
     assert!(zcode
         .items
         .iter()
-        .any(|i| i.path.ends_with(".zcode/cli/rollout")));
+        .any(|i| path_ends_with(&i.path, ".zcode/cli/rollout")));
 
     let codex = results.iter().find(|r| r.agent == "codex").unwrap();
     assert!(codex
         .items
         .iter()
-        .any(|i| i.path.ends_with(".codex/logs_2.sqlite")));
+        .any(|i| path_ends_with(&i.path, ".codex/logs_2.sqlite")));
     assert!(codex
         .items
         .iter()
-        .any(|i| i.path.ends_with("Library/Logs/com.openai.codex")));
+        .any(|i| path_ends_with(&i.path, "Library/Logs/com.openai.codex")));
 
     let opencode = results.iter().find(|r| r.agent == "opencode").unwrap();
     assert!(opencode
         .items
         .iter()
-        .any(|i| i.path.ends_with(".opencode/logs")));
+        .any(|i| path_ends_with(&i.path, ".opencode/logs")));
 
     let dsh = results.iter().find(|r| r.agent == "dsh").unwrap();
     assert!(dsh
         .items
         .iter()
-        .any(|i| i.path.ends_with("Library/Logs/DeepSeek Harness")));
+        .any(|i| path_ends_with(&i.path, "Library/Logs/DeepSeek Harness")));
 }
 
 #[test]
@@ -909,21 +909,20 @@ fn test_uv_bucketed_cold_cache_and_xdg_cache_library_logs_discovery() {
     );
 
     let pkg_cache = results.iter().find(|r| r.agent == "pkg-cache").unwrap();
-    assert!(pkg_cache.items.iter().any(
-        |i| i.path.ends_with("archive-v0/pkg-hash-1") && i.category == ScanCategory::ColdCache
-    ));
+    assert!(pkg_cache.items.iter().any(|i| {
+        path_ends_with(&i.path, "archive-v0/pkg-hash-1") && i.category == ScanCategory::ColdCache
+    }));
     assert!(pkg_cache
         .items
         .iter()
-        .any(|i| i.path.ends_with(".tmp14EAgl") && i.category == ScanCategory::Tmp));
+        .any(|i| path_ends_with(&i.path, ".tmp14EAgl") && i.category == ScanCategory::Tmp));
     assert!(!pkg_cache
         .items
         .iter()
-        .any(|i| i.path.ends_with(".tmpEmpty")));
-    assert!(pkg_cache
-        .items
-        .iter()
-        .any(|i| i.path.ends_with("chrome/mac_arm-156") && i.category == ScanCategory::ColdCache));
+        .any(|i| path_ends_with(&i.path, ".tmpEmpty")));
+    assert!(pkg_cache.items.iter().any(|i| {
+        path_ends_with(&i.path, "chrome/mac_arm-156") && i.category == ScanCategory::ColdCache
+    }));
 
     let omo = results
         .iter()
@@ -945,7 +944,7 @@ fn test_uv_bucketed_cold_cache_and_xdg_cache_library_logs_discovery() {
     assert!(myagent
         .items
         .iter()
-        .any(|i| i.path.ends_with("daemon.log") && i.category == ScanCategory::Log));
+        .any(|i| path_ends_with(&i.path, "daemon.log") && i.category == ScanCategory::Log));
 }
 
 #[test]
